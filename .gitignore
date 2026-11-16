@@ -1,0 +1,29 @@
+# Gradle and build outputs
+.gradle/
+build/
+*/build/
+.kotlin/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Local machine files
+local.properties
+.idea/
+*.iml
+.DS_Store
+.externalNativeBuild/
+.cxx/
+
+# Signing keys and secrets (never commit these)
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+google-services.json
+
+# Logs
+*.log

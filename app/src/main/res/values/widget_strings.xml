@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wi_search_info_desc">Search bar</string>
+    <string name="wi_quick_info_desc">Search, voice, private tab and downloads</string>
+    <string name="wi_sites_info_desc">Your most visited sites</string>
+    <string name="wi_stats_info_desc">Ads and trackers blocked</string>
+    <string name="wi_dot_info_desc">Tap the dot to search</string>
+</resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/w_root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <ImageView android:layout_width="56dp" android:layout_height="56dp" android:layout_gravity="center" android:background="@drawable/w_circle_soft" android:padding="12dp" android:src="@drawable/wi_dot" android:tint="@color/w_fg" android:contentDescription="Browser search" />
+</FrameLayout>

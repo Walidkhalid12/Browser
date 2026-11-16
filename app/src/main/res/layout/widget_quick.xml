@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/w_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/w_panel" android:orientation="horizontal" android:gravity="center_vertical" android:padding="6dp">
+    <LinearLayout android:id="@+id/w_a0" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+        <ImageView android:layout_width="44dp" android:layout_height="44dp" android:background="@drawable/w_circle_soft" android:padding="11dp" android:src="@drawable/wi_search" android:tint="@color/w_fg" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Search" android:textColor="@color/w_fg" android:textSize="11sp" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/w_a1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+        <ImageView android:layout_width="44dp" android:layout_height="44dp" android:background="@drawable/w_circle_soft" android:padding="11dp" android:src="@drawable/wi_mic" android:tint="@color/w_fg" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Voice" android:textColor="@color/w_fg" android:textSize="11sp" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/w_a2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+        <ImageView android:layout_width="44dp" android:layout_height="44dp" android:background="@drawable/w_circle_soft" android:padding="11dp" android:src="@drawable/wi_private" android:tint="@color/w_fg" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Private" android:textColor="@color/w_fg" android:textSize="11sp" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/w_a3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:orientation="vertical" android:gravity="center">
+        <ImageView android:layout_width="44dp" android:layout_height="44dp" android:background="@drawable/w_circle_soft" android:padding="11dp" android:src="@drawable/wi_down" android:tint="@color/w_fg" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Downloads" android:textColor="@color/w_fg" android:textSize="11sp" android:fontFamily="sans-serif-medium" android:maxLines="1" />
+    </LinearLayout>
+</LinearLayout>

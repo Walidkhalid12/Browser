@@ -1,0 +1,8 @@
+HSPLcom/khalid/browser/**;->**(**)**
+Lcom/khalid/browser/**;
+HSPLkotlinx/coroutines/**;->**(**)**
+Lkotlinx/coroutines/**;
+HSPLandroidx/webkit/**;->**(**)**
+Landroidx/webkit/**;
+HSPLandroidx/swiperefreshlayout/**;->**(**)**
+Landroidx/swiperefreshlayout/**;

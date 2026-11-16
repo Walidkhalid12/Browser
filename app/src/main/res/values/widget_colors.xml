@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="w_bg">#FFFFFF</color>
+    <color name="w_fg">#000000</color>
+    <color name="w_soft">#EFEFEF</color>
+    <color name="w_dim">#8A8A8A</color>
+</resources>

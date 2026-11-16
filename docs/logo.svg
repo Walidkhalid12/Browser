@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Browser launcher icon: white background with the black dot from app/src/main/res/drawable/ic_fg.xml (radius 17 of 108) -->
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="#FFFFFF" stroke="#E6E6E6" stroke-width="4"/>
+  <circle cx="256" cy="256" r="117" fill="#000000"/>
+</svg>

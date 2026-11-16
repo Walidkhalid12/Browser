@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/w_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/w_panel" android:orientation="vertical" android:padding="16dp">
+    <ImageView android:layout_width="26dp" android:layout_height="26dp" android:src="@drawable/wi_shield" android:tint="@color/w_fg" />
+    <FrameLayout android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1" />
+    <TextView android:id="@+id/w_count" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textColor="@color/w_fg" android:textSize="34sp" android:fontFamily="sans-serif-black" android:maxLines="1" />
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ads and trackers blocked" android:textColor="@color/w_dim" android:textSize="12sp" android:fontFamily="sans-serif-medium" />
+</LinearLayout>
