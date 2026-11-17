@@ -32,9 +32,12 @@ val isRobolectric: Boolean get() = Build.FINGERPRINT == "robolectric"
 data class Account(val email: String, val name: String)
 data class Entry(val url: String, val title: String, val time: Long)
 
-/** One file from DownloadManager. status uses DownloadManager.STATUS_* values. */
-data class Dl(val id: Long, val name: String, val status: Int, val done: Long, val total: Long, val mime: String, val src: String = "", val time: Long = 0L, val reason: Int = 0) {
+/** One download. status uses the DownloadManager.STATUS_* numbers (1.0.2: Browser's own engine uses the same ones).
+ *  speed = bytes per second from the engine (-1 = unknown), note = a short line like "started over", resumable = can pause and continue. */
+data class Dl(val id: Long, val name: String, val status: Int, val done: Long, val total: Long, val mime: String, val src: String = "", val time: Long = 0L, val reason: Int = 0,
+              val speed: Double = -1.0, val note: String = "", val resumable: Boolean = true, val own: Boolean = false) {
     val running get() = status == 1 || status == 2 || status == 4
+    val paused get() = status == 4
     val ok get() = status == 8
     val failed get() = status == 16
     val ext get() = name.substringAfterLast('.', "").take(4).uppercase().ifBlank { "FILE" }
@@ -114,6 +117,9 @@ interface BrowserHost {
     /** Delete the file and forget the download. */
     fun deleteDownload(id: Long) {}
     fun retryDownload(d: Dl) {}
+    /** 1.0.2: pause and continue Browser's own downloads. */
+    fun pauseDownload(id: Long) {}
+    fun resumeDownload(id: Long) {}
     /** Pick any file on the phone and show it in the browser. */
     fun pickAnyFile() {}
     // ---- 1.0.1 ----
@@ -242,7 +248,7 @@ class Store(ctx: Context) {
     }
     fun flag(key: String) = prefs.getBoolean("flag_$key", false)
     fun setFlag(key: String) { prefs.edit().putBoolean("flag_$key", true).apply() }
-    fun forgetDownloads(ids: Collection<Long>) { downloads.removeAll(ids.toSet()); writeDownloads() }
+    fun forgetDownloads(ids: Collection<Long>) { ids.forEach { DlEngine.forget(it) }; downloads.removeAll(ids.toSet()); writeDownloads() }
     fun str(key: String): String? = prefs.getString("s_$key", null)
     fun setStr(key: String, v: String) { prefs.edit().putString("s_$key", v).apply() }
     /** Widgets inside the home dot, in order (0.5.0). */

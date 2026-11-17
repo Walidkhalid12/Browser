@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="share" path="share/" />
+    <!-- 1.0.2: finished downloads on Android 8 and 9 -->
+    <external-files-path name="dl" path="Download/" />
+    <files-path name="dl_internal" path="Download/" />
 </paths>

@@ -11,8 +11,8 @@
 <p align="center"><b>A clean, black-and-white Android browser with smooth motion and downloads done right.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.1/Browser-1.0.1.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-v1.0.1-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
+  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.2/Browser-1.0.2.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-v1.0.2-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
   </a>
 </p>
 
@@ -60,6 +60,10 @@ It's free, open source, and only about 2 MB.
 - Your most visited sites sit right under the dot.
 
 **Downloads done right**
+- Browser downloads files itself, so they keep going when you leave the app or lock the screen, with a notification that shows progress and has Pause and Cancel.
+- Pause and continue any time. A paused or interrupted download picks up from the exact byte, even after you close the app or restart your phone.
+- Fast and steady: big files download over up to 6 connections at once, connections are reused, and every file's size is checked when it finishes.
+- When the network drops, downloads wait and continue by themselves when it's back.
 - Live speed and time left, plus the number of files and their total size.
 - Filters for videos, images, audio and documents, grouped by day, with thumbnails for photos and videos.
 - A menu on every file: open, open with, share, copy link, retry, remove or delete.
@@ -99,7 +103,7 @@ It's free, open source, and only about 2 MB.
 
 ## Install
 
-1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.1.apk**.
+1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.2.apk**.
 2. Open the file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 4. **Play Protect** may warn you because the app isn't from the Play Store. Tap **More details**, then **Install anyway**.
@@ -135,7 +139,7 @@ Run the tests with `./gradlew testDebugUnitTest`.
 
 - **Kotlin** and **Jetpack Compose** (foundation only, no Material), with custom animations
 - **Android WebView** with AndroidX WebKit for pages
-- Android **DownloadManager** for downloads
+- Its own download engine: a foreground service with ranged, multi-connection downloads that pause and resume
 - **Robolectric** for UI tests
 - R8 shrinking and a baseline profile for release builds
 

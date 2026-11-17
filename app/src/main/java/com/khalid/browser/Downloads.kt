@@ -66,12 +66,13 @@ private fun statusLine(d: Dl, speed: Double): String = when (d.status) {
         if (speed > 1024) {
             append("  ·  ${fmtBytes(speed.toLong())}/s")
             if (d.total > d.done) {
-                val s = ((d.total - d.done) / speed).toLong()
-                append("  ·  " + when { s < 60 -> "${s}s left"; s < 3600 -> "${s / 60} min left"; else -> "${s / 3600} h left" })
+                append("  ·  " + DlName.timeLeft(((d.total - d.done) / speed).toLong()))
             }
         }
+        if (d.note.isNotBlank()) append("  ·  ${d.note.lowercase(Locale.US)}")
     }
-    4 -> "Paused  ·  " + DlName.pauseReason(d.reason) + if (d.total > 0) "  ·  ${(d.done * 100 / d.total)}%" else ""
+    4 -> "Paused  ·  " + DlName.pauseReason(d.reason) + (if (d.total > 0) "  ·  ${(d.done * 100 / d.total)}%" else "") +
+        (if (d.own && !d.resumable && d.reason == 10) "  ·  this site can't continue, it will start over" else "")
     8 -> "${fmtBytes(if (d.total > 0) d.total else d.done)}  ·  " + (mediaDur[d.id]?.let { "video  ·  " + fmtDur(it) }
         ?: groupOf(d.name, d.mime).removeSuffix("s").lowercase(Locale.US).let { if (it == "doc") "document" else if (it == "app") "app  ·  tap to install" else it })
     16 -> "Failed  ·  " + DlName.failReason(d.reason).let { if (it.isBlank()) "" else "$it  ·  " } + "tap to try again"
@@ -217,16 +218,20 @@ fun DownloadsScreen(st: BrowserState, open: Boolean) {
                 }
                 item(key = d.id) {
                     DownloadRow(
-                        st, d, speeds[d.id] ?: 0.0,
+                        st, d, if (d.speed >= 0) d.speed else speeds[d.id] ?: 0.0,
                         Modifier.animateItem(fadeInSpec = tween(200), placementSpec = tween(240, easing = EaseOut), fadeOutSpec = tween(160)),
                         onOpen = {
                             when {
                                 d.ok -> st.host.openDownload(d.id)
                                 d.failed -> st.host.retryDownload(d)
+                                d.own && d.paused -> st.host.resumeDownload(d.id)
                             }
                         },
                         onMore = {
-                            if (d.running) {
+                            // 1.0.2: Browser's own downloads pause and continue; long-press for Cancel
+                            if (d.own && d.running) {
+                                if (d.paused) st.host.resumeDownload(d.id) else st.host.pauseDownload(d.id)
+                            } else if (d.running) {
                                 st.host.cancelDownload(d.id)
                                 st.store.forgetDownloads(listOf(d.id))
                                 items = items.filter { it.id != d.id }
@@ -270,7 +275,7 @@ private fun DownloadRow(st: BrowserState, d: Dl, speed: Double, modifier: Modifi
     val density = androidx.compose.ui.platform.LocalDensity.current
     val thumb = DownloadThumb(st, d, with(density) { 46.dp.roundToPx() } * 2)
     Column(
-        modifier.squish(0.97f, onLongPress = { if (!d.running) st.card = Card.FileMenu(d) }, onClick = onOpen).fillMaxWidth()
+        modifier.squish(0.97f, onLongPress = { if (!d.running || d.own) st.card = Card.FileMenu(d) }, onClick = onOpen).fillMaxWidth()
             .clip(RoundedCornerShape(22.dp)).background(pal.soft)
             .padding(start = 14.dp, end = 6.dp, top = 12.dp, bottom = 12.dp)
     ) {
@@ -291,7 +296,12 @@ private fun DownloadRow(st: BrowserState, d: Dl, speed: Double, modifier: Modifi
                 T(statusLine(d, speed), 12.sp, 500, pal.fg.copy(alpha = 0.55f))
             }
             Box(Modifier.squish(0.9f, onClick = onMore).size(44.dp), contentAlignment = Alignment.Center) {
-                if (d.running) Glyph(G.Close, pal.fg, 14.dp, 2.dp) else Glyph(G.Dots, pal.fg, 18.dp)
+                when {
+                    d.own && d.paused -> PlayPause(play = true, pal.fg)
+                    d.own && d.running -> PlayPause(play = false, pal.fg)
+                    d.running -> Glyph(G.Close, pal.fg, 14.dp, 2.dp)
+                    else -> Glyph(G.Dots, pal.fg, 18.dp)
+                }
             }
         }
         if (d.running) {
@@ -299,7 +309,8 @@ private fun DownloadRow(st: BrowserState, d: Dl, speed: Double, modifier: Modifi
             Box(
                 Modifier.padding(end = 10.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(pal.faint)
             ) {
-                Box(Modifier.fillWidthOf { shownF.value.coerceAtLeast(0.02f) }.height(4.dp).clip(RoundedCornerShape(2.dp)).background(pal.fg))
+                Box(Modifier.fillWidthOf { shownF.value.coerceAtLeast(0.02f) }.height(4.dp).clip(RoundedCornerShape(2.dp))
+                    .background(if (d.paused) pal.fg.copy(alpha = 0.4f) else pal.fg))
             }
         }
     }
@@ -315,6 +326,13 @@ fun FileMenuCard(st: BrowserState, d: Dl) {
         T(statusLine(d, 0.0), 13.sp, 500, pal.fg.copy(alpha = 0.55f))
     }
     fun done() { st.card = null }
+    if (d.own && d.running) {
+        // 1.0.2: a download on its way: pause, continue or cancel
+        CardRow(if (d.paused) "Continue" else "Pause", true) { done(); if (d.paused) st.host.resumeDownload(d.id) else st.host.pauseDownload(d.id) }
+        if (d.src.isNotBlank()) CardRow("Copy link") { done(); st.host.copy(d.src); st.notify("Link copied") }
+        CardRow("Cancel download") { done(); st.host.deleteDownload(d.id); st.notify("Cancelled ${d.name}") }
+        return
+    }
     if (d.ok) {
         CardRow("Open", true) { done(); st.host.openDownload(d.id) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -488,6 +506,22 @@ private fun PlayBadge(size: androidx.compose.ui.unit.Dp) {
             val w = this.size.width
             val p = androidx.compose.ui.graphics.Path().apply { moveTo(w * 0.2f, 0f); lineTo(w, w * 0.5f); lineTo(w * 0.2f, w); close() }
             drawPath(p, androidx.compose.ui.graphics.Color.White)
+        }
+    }
+}
+
+/** 1.0.2: pause (two bars) and continue (triangle) for a download row. */
+@Composable
+private fun PlayPause(play: Boolean, color: androidx.compose.ui.graphics.Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(16.dp)) {
+        val w = size.width
+        if (play) {
+            val p = androidx.compose.ui.graphics.Path().apply { moveTo(w * 0.22f, w * 0.12f); lineTo(w * 0.9f, w * 0.5f); lineTo(w * 0.22f, w * 0.88f); close() }
+            drawPath(p, color)
+        } else {
+            val r = androidx.compose.ui.geometry.CornerRadius(w * 0.08f)
+            drawRoundRect(color, androidx.compose.ui.geometry.Offset(w * 0.18f, w * 0.12f), androidx.compose.ui.geometry.Size(w * 0.22f, w * 0.76f), r)
+            drawRoundRect(color, androidx.compose.ui.geometry.Offset(w * 0.6f, w * 0.12f), androidx.compose.ui.geometry.Size(w * 0.22f, w * 0.76f), r)
         }
     }
 }

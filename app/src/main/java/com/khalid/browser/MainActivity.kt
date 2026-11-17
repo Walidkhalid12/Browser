@@ -286,6 +286,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
         if (!linkIntent && savedInstanceState == null) st.leaveToHome()
         handleIntent(intent)
         ContextCompat.registerReceiver(this, doneReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED)
+        startDownloads()
         // Load the web engine while the app is idle, so the first page opens faster.
         // 1.0.1: only AFTER the opening animation. Before, this 100-300 ms job could land between two
         // frames of the animation (the "sometimes lags"); now it waits for the intro to finish.
@@ -345,7 +346,33 @@ class MainActivity : ComponentActivity(), BrowserHost {
         }
     }
 
+    /** 1.0.2: Browser's own downloads: messages when one ends, and downloads cut off earlier carry on. */
+    private fun startDownloads() {
+        DlEngine.init(this)
+        DlEngine.webReady = true
+        DlEngine.onEnd = { t ->
+            if (st.store.downloads.contains(t.id)) {
+                val id = t.id
+                if (t.status == DlState.DONE && (t.name.endsWith(".apk", true) || t.mime == APK)) st.notify("Downloaded ${t.name}", "Install") { downloadFile(id)?.let { installApk(it) } }
+                else if (t.status == DlState.DONE) st.notify("Downloaded ${t.name}", "Open") { openDownload(id) }
+                else st.notify("Download failed", "View") { st.openDownloads(Screen.Home) }
+            }
+        }
+        val cut = DlEngine.killedBySystem
+        DlEngine.killedBySystem = false
+        DlEngine.continueInterrupted()
+        // MIUI and some other phones close apps in the background to save battery. Say so once, with a way out.
+        if (cut && !st.store.flag("hint_battery") && !isRobolectric) {
+            st.store.setFlag("hint_battery")
+            st.notify("Your phone stopped a download. Allow Browser to run in the background", "Settings") {
+                runCatching { startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) }
+            }
+        }
+    }
+
     override fun onDestroy() {
+        DlEngine.webReady = false
+        DlEngine.onEnd = null
         runCatching { unregisterReceiver(doneReceiver) }
         super.onDestroy()
     }
@@ -509,37 +536,59 @@ class MainActivity : ComponentActivity(), BrowserHost {
             st.notify("This file can't be downloaded"); return
         }
         try {
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             // 0.7.0: the same file already on its way is not started twice
             val running = queryDownloads(st.store.downloads.toList()).firstOrNull { it.running && it.src == url }
-            if (running != null) { st.notify("Already downloading ${running.name}", "View") { st.openDownloads(Screen.Home) }; return }
+            if (running != null) {
+                if (running.paused) resumeDownload(running.id)
+                st.notify("Already downloading ${running.name}", "View") { st.openDownloads(Screen.Home) }; return
+            }
             val name = DlName.of(url, contentDisposition, mime)
             val type = DlName.typeOf(name, mime)
-            val req = DownloadManager.Request(Uri.parse(url)).apply {
-                if (type.isNotBlank()) setMimeType(type)
-                CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
-                if (userAgent.isNotBlank()) addRequestHeader("User-Agent", userAgent)
-                st.active?.url?.takeIf { it.startsWith("http") }?.let { addRequestHeader("Referer", it) }
-                setTitle(name)
-                setDescription(Uri.parse(url).host ?: "")
-                setAllowedOverMetered(true)
-                setAllowedOverRoaming(true)
-                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-            }
-            val id = dm.enqueue(req)
-            st.store.addDownload(id)
-            st.notify("Downloading $name", "View") { st.openDownloads(Screen.Home) }
+            // 1.0.2: Browser downloads the file itself (several connections, pause and continue, keeps going
+            // in the background) instead of handing it to the phone's download app. Same cookies, user agent
+            // and page address as the web page, so files behind a sign-in still work.
+            val cookie = runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull().orEmpty()
+            val referer = st.active?.url?.takeIf { it.startsWith("http") }.orEmpty()
+            askNotificationsOnce()
+            val t = DlEngine.add(this, url, name, type, userAgent, cookie, referer)
+            st.store.addDownload(t.id)
+            st.notify("Downloading ${t.name}", "View") { st.openDownloads(Screen.Home) }
         } catch (e: Exception) {
             st.notify("This file can't be downloaded")
         }
     }
 
+    // 1.0.2: Android 13+ asks before showing notifications; asked once, at the first download.
+    private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) DlService.sync(this)
+    }
+    private fun askNotificationsOnce() {
+        if (Build.VERSION.SDK_INT < 33 || DlService.canNotify(this) || st.store.flag("asked_notif") || isRobolectric) return
+        st.store.setFlag("asked_notif")
+        runCatching { notifPerm.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
+    }
+
+    private fun DlTask.toDl() = Dl(id, name, status, done, total, mime, url, if (finished > 0) finished else created, reason,
+        if (status == DlState.RUNNING) speed else 0.0, note, resumable, own = true)
+
+    override fun pauseDownload(id: Long) {
+        DlEngine.pause(id)
+        DlEngine.get(id)?.let { if (!it.resumable) st.notify("This site can't continue a download, so it will start over") }
+    }
+    override fun resumeDownload(id: Long) {
+        if (!DlEngine.has(id)) return
+        askNotificationsOnce()
+        DlEngine.resume(id)
+    }
+
     override fun queryDownloads(ids: List<Long>): List<Dl> {
         if (ids.isEmpty()) return emptyList()
-        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val found = HashMap<Long, Dl>()
-        dm.query(DownloadManager.Query().setFilterById(*ids.toLongArray()))?.use { c ->
+        // 1.0.2: Browser's own downloads first; older ones still come from the phone's download app
+        val old = ids.filter { id -> DlEngine.get(id)?.let { found[id] = it.toDl() } == null }
+        if (old.isEmpty()) return ids.mapNotNull { found[it] }
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        dm.query(DownloadManager.Query().setFilterById(*old.toLongArray()))?.use { c ->
             val iId = c.getColumnIndex(DownloadManager.COLUMN_ID)
             val iTitle = c.getColumnIndex(DownloadManager.COLUMN_TITLE)
             val iStatus = c.getColumnIndex(DownloadManager.COLUMN_STATUS)
@@ -563,6 +612,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
     }
 
     override fun cancelDownload(id: Long) {
+        if (DlEngine.has(id)) { DlEngine.remove(id); return }
         runCatching { (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id) }
     }
 
@@ -573,6 +623,10 @@ class MainActivity : ComponentActivity(), BrowserHost {
     }
 
     override fun downloadFile(id: Long): FileItem? = runCatching {
+        DlEngine.get(id)?.let { t ->
+            val uri = DlEngine.fileUri(t) ?: return null
+            return FileItem(uri, t.name, DlName.typeOf(t.name, t.mime), id)
+        }
         val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val uri = dm.getUriForDownloadedFile(id) ?: return null
         val d = queryDownloads(listOf(id)).firstOrNull()
@@ -651,11 +705,14 @@ class MainActivity : ComponentActivity(), BrowserHost {
     }
 
     override fun deleteDownload(id: Long) {
+        if (DlEngine.has(id)) { DlEngine.remove(id); st.store.forgetDownloads(listOf(id)); return }
         runCatching { (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id) }
         st.store.forgetDownloads(listOf(id))
     }
 
     override fun retryDownload(d: Dl) {
+        // 1.0.2: continue from where it stopped when the site allows it
+        if (DlEngine.has(d.id)) { resumeDownload(d.id); return }
         if (d.src.isBlank()) { st.notify("Open the page again to download this file"); return }
         deleteDownload(d.id)
         download(d.src, st.active?.view?.settings?.userAgentString ?: "", "attachment; filename=\"${d.name}\"", d.mime)

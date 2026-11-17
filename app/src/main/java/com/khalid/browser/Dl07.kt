@@ -67,6 +67,8 @@ object DlName {
         1002, 1004 -> "connection problem"
         1005 -> "too many redirects"
         1008 -> "can't resume"
+        1010 -> "the file arrived incomplete"
+        1012 -> "the file keeps changing on the site"
         401, 403 -> "the site refused it"
         404 -> "file not found"
         in 500..599 -> "the site has a problem"
@@ -77,6 +79,10 @@ object DlName {
         1 -> "retrying soon"
         2 -> "waiting for network"
         3 -> "waiting for Wi-Fi"
+        11 -> "stopped, tap play to continue"
         else -> "paused"
     }
+
+    /** 1.0.2: "40s left", "3 min left", "2 h left". */
+    fun timeLeft(s: Long): String = when { s < 60 -> "${s}s left"; s < 3600 -> "${s / 60} min left"; else -> "${s / 3600} h left" }
 }
