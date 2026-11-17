@@ -11,8 +11,8 @@
 <p align="center"><b>A clean, black-and-white Android browser with smooth motion and downloads done right.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.3/Browser-1.0.3.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-v1.0.3-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
+  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.4/Browser-1.0.4.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-v1.0.4-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
   </a>
 </p>
 
@@ -76,8 +76,13 @@ It's free, open source, and only about 2 MB.
 - Voice search with its own animated screen.
 - **AI mode:** turn it on and questions are answered by Google AI Mode in a clean screen, with images, sources and follow-up questions.
 
+**Ad blocker**
+- Blocks ads and trackers with the same filter lists as uBlock Origin and AdGuard: EasyList, EasyPrivacy, AdGuard Mobile Ads, Peter Lowe's list and the EasyList Cookie List. They download on first launch and update about once a week on Wi-Fi.
+- Hides the empty ad boxes and banners left behind, from the start of the page, plus cookie banners.
+- Stops pop-ups and pop-unders, "tap anywhere opens an ad" tricks, invisible full-page links and forced redirects to ad or scam pages.
+- An on/off switch in Settings, "allow ads on this site" from the page menu, and a blocked count for each page and in total.
+
 **Privacy**
-- Blocks ads and trackers, and hides cookie banners.
 - Private tabs that lock with your fingerprint or PIN, and delete what those sites stored when you close them.
 - Camera, microphone and location are asked for per site, and you can remove them later.
 - Websites with bad security certificates are refused.
@@ -105,7 +110,7 @@ It's free, open source, and only about 2 MB.
 
 ## Install
 
-1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.3.apk**.
+1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.4.apk**.
 2. Open the file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 4. **Play Protect** may warn you because the app isn't from the Play Store. Tap **More details**, then **Install anyway**.
@@ -142,6 +147,7 @@ Run the tests with `./gradlew testDebugUnitTest`.
 - **Kotlin** and **Jetpack Compose** (foundation only, no Material), with custom animations
 - **Android WebView** with AndroidX WebKit for pages
 - Its own download engine: a foreground service with ranged, multi-connection downloads that pause and resume
+- Its own ad-blocking engine: ad servers as a sorted table of 64-bit fingerprints, every other rule filed under one word of its address, and element hiding injected at document start
 - **Robolectric** for UI tests
 - R8 shrinking and a baseline profile for release builds
 
@@ -149,7 +155,7 @@ Run the tests with `./gradlew testDebugUnitTest`.
 
 - The weather widget finds your rough location from your internet address (ipwho.is or ipapi.co) and gets the weather from Open-Meteo, or wttr.in as a backup.
 - AI mode loads Google AI Mode in the background to get the answer.
-- Ad blocking uses a built-in list in `app/src/main/assets/blocklist.txt`.
+- The ad blocker downloads its filter lists straight from their makers (easylist.to, filters.adtidy.org, pgl.yoyo.org, secure.fanboy.co.nz). Pages and your browsing are never sent anywhere. Until the lists arrive, a small built-in list in `app/src/main/assets/blocklist.txt` is used.
 
 ## Not in 1.0 yet
 
@@ -171,3 +177,11 @@ Ideas and fixes are welcome.
 ## License
 
 Released under the [MIT License](LICENSE). © 2026 Walidkhalid12
+
+### Filter list credits
+
+The ad blocker uses these lists. They are not part of this repo or the APK: the app downloads them from their authors, and each keeps its own license.
+
+- [EasyList](https://easylist.to/), [EasyPrivacy](https://easylist.to/) and the [EasyList Cookie List](https://secure.fanboy.co.nz/fanboy-cookiemonster.txt), by The EasyList authors, under [GPLv3](https://www.gnu.org/licenses/gpl-3.0.html) / [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)
+- [AdGuard Mobile Ads filter](https://github.com/AdguardTeam/AdguardFilters), by AdGuard, under [GPLv3](https://github.com/AdguardTeam/AdguardFilters/blob/master/LICENSE)
+- [Peter Lowe's ad and tracking server list](https://pgl.yoyo.org/adservers/), by Peter Lowe

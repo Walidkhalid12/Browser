@@ -271,6 +271,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
         val email = prefs.getString("account_email", null)
         val account = email?.let { Account(it, prefs.getString("account_name", it) ?: it) }
+        AdBlock.init(applicationContext)
         st = BrowserState(dark, Store(this), this, account)
         // 1.0.3: a release found earlier (at launch or by the background check) shows its home banner right away.
         st.update = Updater.cached(this, APP_VERSION)
@@ -280,7 +281,11 @@ class MainActivity : ComponentActivity(), BrowserHost {
         // 1.0.0: the state files are read on a background thread (the app opens on home, so no page needs
         // them for the first frame); a WebView being created waits for them if they are not in yet.
         st.loadStateAsync(filesDir)
-        Thread { Blocker.load(applicationContext) }.apply { priority = Thread.MIN_PRIORITY }.start()
+        // 1.0.4: the small built-in list blocks at once; the full filter lists load (or download, the first time) after it.
+        Thread {
+            Blocker.load(applicationContext)
+            if (!isRobolectric) { android.os.SystemClock.sleep(1500); runCatching { AdBlock.load(applicationContext) } }
+        }.apply { priority = Thread.MIN_PRIORITY }.start()
         // 1.0.0: last crash report read off the main thread. It shows unless something newer already did
         // (before, a notice from the launch intent replaced it the same way).
         Bg.run {

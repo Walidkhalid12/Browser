@@ -176,6 +176,18 @@ class Tab(val id: Int, url: String, title: String, val private: Boolean, val uid
     /** Host of the main page, readable from the network thread. */
     @Volatile var pageHost: String = hostOf(url)
     @Volatile var shields: Boolean = true
+    /** 1.0.4: blocking is on for this tab's site and in Settings. */
+    val blocking: Boolean get() = shields && AdBlock.enabled
+    /** 1.0.4: a pop-up tab that hasn't shown its first page yet (an ad there closes the tab). */
+    @Volatile var popupFresh = false
+    /** 1.0.4: an ad page the person chose to open anyway. */
+    @Volatile var allowOnce: String? = null
+    /** 1.0.4: counts one blocked thing on this page and in the total. */
+    fun countBlocked() {
+        val n = blockedRaw.incrementAndGet()
+        WidgetStats.blocked.incrementAndGet()
+        if (n == 1 || n % 4 == 0) Bg.main.post { blocked = blockedRaw.get() }
+    }
     var favicon by mutableStateOf<android.graphics.Bitmap?>(null)
     /** A media element is playing (reported by the page). */
     var mediaPlaying by mutableStateOf(false)
@@ -574,6 +586,29 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
     var pip by mutableStateOf(false)
     fun changeLockPrivate(on: Boolean) { lockPrivate = on; store.setBool("lock_private", on); if (!on) privateLocked = false }
 
+    // ---- 1.0.4: ad blocker ----
+    var adOn by mutableStateOf(AdBlock.enabled)
+    var adUpdated by mutableStateOf(AdBlock.updatedAt)
+    var adUpdating by mutableStateOf(AdBlock.updating)
+    init {
+        AdBlock.onChange = { Bg.main.post { adUpdated = AdBlock.updatedAt; adUpdating = AdBlock.updating } }
+    }
+    fun setAdBlock(on: Boolean) {
+        AdBlock.setEnabled(store.app, on); adOn = on
+        tabs.firstOrNull { it.id == activeId }?.view?.reload()
+    }
+    fun updateFilters() {
+        if (adUpdating) return
+        adUpdating = true
+        Thread {
+            val ok = runCatching { AdBlock.update(store.app) }.getOrDefault(false)
+            Bg.main.post {
+                adUpdating = AdBlock.updating; adUpdated = AdBlock.updatedAt
+                notify(if (ok) "Filter lists updated" else "Couldn't update the filter lists. Check your connection")
+            }
+        }.apply { priority = Thread.MIN_PRIORITY }.start()
+    }
+
     fun setForceDarkPages(on: Boolean) { forceDark = on; store.setBool("force_dark", on); rebuildViews() }
 
     /** Rebuild every live WebView (keeps history via saved state). */
@@ -721,6 +756,7 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
         t.title = "Loading\u2026"
         t.openerId = from.id
         t.progress = 5
+        t.popupFresh = true
         screen = Screen.Home
         return t
     }

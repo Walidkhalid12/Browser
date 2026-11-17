@@ -903,6 +903,37 @@ fun MoreScreen(st: BrowserState) {
                     }
                 }
             }
+            // 1.0.4: ad blocker: on/off, total blocked, filter lists date with a manual update.
+            item(key = "adblock") {
+                val total = remember(st.screen, st.adOn) { WidgetStats.total(st.store.app) }
+                Column(Modifier.enterUp(13, 60).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(pal.soft)) {
+                    Row(
+                        Modifier.squish(0.97f) { st.setAdBlock(!st.adOn) }.fillMaxWidth().height(66.dp).padding(start = 20.dp, end = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            T("Block ads", 17.sp, 500)
+                            T(if (!st.adOn) "Off on every site" else if (total == 1L) "1 ad or tracker blocked" else "%,d ads and trackers blocked".format(total),
+                                12.sp, 500, pal.fg.copy(alpha = 0.6f))
+                        }
+                        CleanSwitch(st.adOn)
+                    }
+                    Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(pal.fg.copy(alpha = 0.08f)))
+                    Row(Modifier.fillMaxWidth().height(54.dp).padding(start = 20.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val date = st.adUpdated
+                        T(when {
+                            st.adUpdating -> "Updating filter lists\u2026"
+                            date <= 0L -> "Filter lists not downloaded yet"
+                            else -> "Filter lists updated " + java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(date))
+                        }, 13.sp, 500, pal.fg.copy(alpha = 0.6f), modifier = Modifier.weight(1f))
+                        Box(
+                            Modifier.then(if (st.adUpdating) Modifier else Modifier.squish(0.94f) { st.updateFilters() }).height(34.dp)
+                                .clip(RoundedCornerShape(17.dp)).background(if (st.adUpdating) pal.fg.copy(alpha = 0.15f) else pal.fg).padding(horizontal = 14.dp),
+                            contentAlignment = Alignment.Center
+                        ) { T("Update", 13.sp, 700, if (st.adUpdating) pal.fg.copy(alpha = 0.5f) else pal.bg) }
+                    }
+                }
+            }
             // 1.0.1: default browser + updates
             item(key = "default") {
                 Row(

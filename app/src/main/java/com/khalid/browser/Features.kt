@@ -7,7 +7,7 @@ import android.os.Parcel
 import java.net.URLEncoder
 import java.util.Locale
 
-const val APP_VERSION = "1.0.3"
+const val APP_VERSION = "1.0.4"
 
 // =====================================================================
 // Search shortcuts: "@yt cats" searches YouTube, "@w", "@gh", "@maps", "@x"
@@ -206,6 +206,59 @@ html.cookie-consent-open,body.cookie-consent-open,body.cky-modal-open{overflow:a
 })();
 """
 
+
+    /**
+     * 1.0.4: the ad blocker's page side. Runs at document start (in every frame) when blocking is on:
+     * - hides ad boxes with element-hiding CSS from the filter lists: this site's rules at once, then the
+     *   generic rules for the class and id names the page really uses, as elements appear;
+     * - stops unwanted pop-ups: window.open to an ad address, pop-ups from a tap that didn't hit a link or
+     *   button ("click anywhere opens an ad"), a second pop-up from the same tap, and invisible full-page links.
+     */
+    val ADBLOCK_JS = """
+(function(){
+ var H=location.hostname,css='';
+ try{css=BrowserApp.css(H)}catch(e){}
+ var st=document.createElement('style');st.textContent=css;
+ function put(){var r=document.head||document.documentElement;if(r&&st.parentNode!==r)r.appendChild(st);}
+ put();
+ var seen=Object.create(null),q=[],pend=[],timer=0;
+ function add(n){if(n&&n.length<120&&!seen[n]){seen[n]=1;q.push(n);}}
+ function grab(el){if(el.nodeType!==1)return;if(el.id&&typeof el.id=='string')add('#'+el.id);var c=el.classList;if(c)for(var i=0;i<c.length;i++)add('.'+c[i]);}
+ function flush(){if(!q.length)return;var n=q.join(' ');q=[];var g='';try{g=BrowserApp.gcss(H,n)}catch(e){}if(g)st.appendChild(document.createTextNode(g));put();}
+ function scan(root){grab(root);if(root.querySelectorAll){var l=root.querySelectorAll('[id],[class]');for(var i=0;i<l.length&&i<8000;i++)grab(l[i]);}}
+ function run(){timer=0;var p=pend;pend=[];for(var i=0;i<p.length;i++)scan(p[i]);flush();}
+ function later(){if(!timer)timer=setTimeout(run,200);}
+ try{new MutationObserver(function(ms){for(var i=0;i<ms.length;i++){var m=ms[i];if(m.type=='attributes')pend.push(m.target);else{var a=m.addedNodes;for(var j=0;j<a.length;j++)if(a[j].nodeType===1)pend.push(a[j]);}}
+  if(pend.length>400)pend=[document.documentElement];later();}).observe(document,{childList:true,subtree:true,attributes:true,attributeFilter:['class','id']});}catch(e){}
+ pend.push(document.documentElement);later();
+ document.addEventListener('DOMContentLoaded',function(){pend=[document.documentElement];run();});
+ function base(h){var p=String(h).split('.');return p.slice(-2).join('.');}
+ function abs(u){try{return new URL(u,location.href).href}catch(e){return ''}}
+ function cross(u){try{var x=new URL(u,location.href);return x.protocol.indexOf('http')===0&&base(x.hostname)!==base(H);}catch(e){return false}}
+ function overlay(n){try{var r=n.getBoundingClientRect();if(r.width*r.height<innerWidth*innerHeight*0.5)return false;var s=getComputedStyle(n);
+  return parseFloat(s.opacity)<0.1||((s.position=='fixed'||s.position=='absolute')&&!(n.textContent||'').trim()&&!n.querySelector('img,video,canvas,svg,picture'));}catch(e){return false}}
+ function intended(el){for(var n=el,k=0;n&&n.nodeType===1&&k<10;n=n.parentElement,k++){var t=n.tagName;
+  if(t=='HTML'||t=='BODY')return false;
+  if(t=='A'||t=='BUTTON'||t=='INPUT'||t=='SELECT'||t=='LABEL'||t=='SUMMARY'||n.getAttribute('role')=='button'||n.getAttribute('role')=='link'||n.hasAttribute('onclick'))return !overlay(n);
+  try{if(getComputedStyle(n).cursor=='pointer')return !overlay(n);}catch(e){}}
+  return false;}
+ var down=null,downAt=0,opened=0,link='';
+ addEventListener('pointerdown',function(e){down=e.target;downAt=Date.now();opened=0;link='';},true);
+ addEventListener('touchstart',function(e){if(Date.now()-downAt>50){down=e.target;downAt=Date.now();opened=0;link='';}},true);
+ var wo=window.open;
+ try{window.open=function(u){var url=u==null?'':String(u);
+  if(url){var a=abs(url);try{if(a&&BrowserApp.adUrl(a))return null;}catch(e){}
+   if(a&&a===link){link='';opened++;return wo.apply(window,arguments);}
+   if(cross(url)&&Date.now()-downAt<1500&&(opened>0||!intended(down))){try{BrowserApp.popupBlocked()}catch(e){}return null;}}
+  opened++;return wo.apply(window,arguments);};}catch(e){}
+ document.addEventListener('click',function(e){var t=e.target,a=t&&t.closest?t.closest('a[href]'):null;if(!a)return;var h=a.href;if(!h||h.indexOf('http')!==0)return;
+  var bad=false;try{bad=BrowserApp.adUrl(h)}catch(x){}
+  if(!bad&&cross(h)&&overlay(a)){bad=true;try{BrowserApp.popupBlocked()}catch(x){}}
+  if(bad){e.preventDefault();e.stopImmediatePropagation();return;}
+  link=h;opened++;},true);
+})();
+"""
+
     /** Runs at document start: media reports (background audio / PiP) and, when shields are on, cookie banners. */
     val DOC_START = """
 (function(){
@@ -224,6 +277,7 @@ html.cookie-consent-open,body.cookie-consent-open,body.cky-modal-open{overflow:a
   var s=document.createElement('style');s.textContent=${org.json.JSONObject.quote(COOKIE_CSS)};
   (document.head||document.documentElement).appendChild(s);
   $COOKIE_JS
+  $ADBLOCK_JS
  }
 })();
 """

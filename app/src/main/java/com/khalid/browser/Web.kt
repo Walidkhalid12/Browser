@@ -102,6 +102,8 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
         // 1.0.3: every web link stays in Browser (see LinkRouter); only real app links leave, when tapped.
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
+            // 1.0.4: a page sending you to an ad or scam page (forced redirects, "click anywhere" tricks).
+            if (request.isForMainFrame && adNavigation(tab, url, request.hasGesture() && !request.isRedirect)) return true
             return when (val r = LinkRouter.route(url, request.hasGesture(), request.isRedirect, request.isForMainFrame)) {
                 LinkRoute.Stay -> false
                 LinkRoute.Block -> true
@@ -112,17 +114,23 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
                 }
             }
         }
-        // Ads and trackers: third-party requests to listed hosts get an empty answer.
+        // 1.0.4: ads and trackers get an empty answer, decided by the filter lists (AdBlock / AdEngine).
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
-            if (!tab.shields || request.isForMainFrame) return null
+            val url = request.url.toString()
+            if (request.isForMainFrame) {
+                // A pop-up tab whose page is an ad (pop-unders, "click anywhere" ads): close it before it loads.
+                if (tab.popupFresh && popupIsAd(tab, url)) {
+                    Bg.main.post { closeAdPopup(st, tab) }
+                    return emptyResponse()
+                }
+                return null
+            }
+            if (!tab.blocking) return null
             val h = request.url.host ?: return null
-            val page = tab.pageHost
-            if (page.isNotEmpty() && (h == page || h.endsWith(".$page"))) return null
-            if (!Blocker.blocked(h)) return null
-            val n = tab.blockedRaw.incrementAndGet()
-            WidgetStats.blocked.incrementAndGet()
-            if (n == 1 || n % 4 == 0) Bg.main.post { tab.blocked = tab.blockedRaw.get() }
-            return android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            if (!url.startsWith("http")) return null
+            if (!AdBlock.blockRequest(url, h.lowercase(), tab.pageHost, request.requestHeaders["Accept"])) return null
+            tab.countBlocked()
+            return emptyResponse()
         }
         override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler, error: android.net.http.SslError) {
             // Never load a page with a bad certificate. Tell the user instead of failing silently.
@@ -131,6 +139,9 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
             if (tab.id == st.activeId) st.notify("Not secure: this site's certificate is invalid")
         }
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+            if (tab.popupFresh && url != POPUP_URL && url != "about:blank") {
+                if (popupIsAd(tab, url)) { view.stopLoading(); closeAdPopup(st, tab); return }
+            }
             val newHost = hostOf(url)
             if (newHost != tab.pageHost) {
                 tab.pageHost = newHost
@@ -148,7 +159,10 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
             tab.progress = maxOf(tab.progress.coerceAtMost(99), 5)
             if (tab.id == st.activeId) st.barCollapsed = false
         }
-        override fun onPageCommitVisible(view: WebView, url: String) { scheduleSample(tab, 60) }
+        override fun onPageCommitVisible(view: WebView, url: String) {
+            if (url != POPUP_URL && url != "about:blank") tab.popupFresh = false
+            scheduleSample(tab, 60)
+        }
         // The page's renderer died (low memory, a heavy site). Without this the whole app is killed.
         override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
             runCatching {
@@ -387,7 +401,63 @@ class PageBridge(private val st: BrowserState, private val tab: Tab) {
         main.post { tab.mediaPlaying = playing; st.host.mediaChanged() }
     }
     @android.webkit.JavascriptInterface fun shields(host: String?): Boolean =
-        tab.shields && st.site.shields(host.orEmpty().removePrefix("www."))
+        tab.blocking && st.site.shields(host.orEmpty().removePrefix("www."))
+
+    // ---- 1.0.4: ad blocker ----
+    /** Element-hiding CSS for the start of a page on [host] (this site's rules + the always-on generic ones). */
+    @android.webkit.JavascriptInterface fun css(host: String?): String =
+        if (shields(host)) runCatching { AdBlock.pageCss(host.orEmpty()) }.getOrDefault("") else ""
+    /** CSS for the class and id names the page uses (".name #name ..."). */
+    @android.webkit.JavascriptInterface fun gcss(host: String?, names: String?): String =
+        if (shields(host)) runCatching { AdBlock.genericCss(host.orEmpty(), names.orEmpty().take(60_000)) }.getOrDefault("") else ""
+    /** Asked by window.open and link clicks: is this an ad or scam address? Counts it when it is. */
+    @android.webkit.JavascriptInterface fun adUrl(url: String?): Boolean {
+        val u = url ?: return false
+        if (!tab.blocking || !AdBlock.adNavigation(u, tab.pageHost)) return false
+        popupBlocked(); return true
+    }
+    /** The page tried an unwanted pop-up (blocked by the page script). */
+    @android.webkit.JavascriptInterface fun popupBlocked() {
+        if (!tab.blocking) return
+        tab.countBlocked()
+        main.post { if (tab.id == st.activeId) st.notify("Pop-up blocked") }
+    }
+}
+
+private fun emptyResponse() = android.webkit.WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+
+/** 1.0.4: a pop-up tab's first page is an ad when it's on the lists (checked against the page that opened it). */
+private fun popupIsAd(tab: Tab, url: String): Boolean {
+    if (!AdBlock.enabled || !url.startsWith("http")) return false
+    val opener = currentState?.tabs?.firstOrNull { it.id == tab.openerId }
+    if (opener != null && !opener.blocking) return false
+    return AdBlock.adNavigation(url, opener?.pageHost ?: "")
+}
+
+private fun closeAdPopup(st: BrowserState, tab: Tab) {
+    if (!tab.popupFresh) return
+    tab.popupFresh = false
+    st.tabs.firstOrNull { it.id == tab.openerId }?.countBlocked() ?: WidgetStats.blocked.incrementAndGet()
+    st.closePopupTab(tab)
+    st.notify("Pop-up ad blocked")
+}
+
+/**
+ * 1.0.4: the page wants to go to an ad or scam page. Blocked; when the person tapped it themselves,
+ * the message offers "Open anyway". True when the navigation is stopped.
+ */
+private fun adNavigation(tab: Tab, url: String, tapped: Boolean): Boolean {
+    if (!tab.blocking || !url.startsWith("http")) return false
+    if (tab.allowOnce == url) { tab.allowOnce = null; return false }
+    if (!AdBlock.adNavigation(url, tab.pageHost)) return false
+    tab.countBlocked()
+    val st = currentState ?: return true
+    if (tab.popupFresh) { Bg.main.post { closeAdPopup(st, tab) }; return true }
+    if (tab.id == st.activeId) {
+        if (tapped) st.notify("Ad page blocked", "Open anyway") { tab.allowOnce = url; tab.view?.loadUrl(url) }
+        else st.notify("Redirect to an ad blocked")
+    }
+    return true
 }
 
 /** "w,h" from Scripts.VIDEO_SHAPE (a JSON string) to the host. */

@@ -187,8 +187,8 @@ fun QuickSettings(st: BrowserState) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     QTile("Dark pages", if (st.forceDark) "On" else "Off", st.forceDark, Modifier.weight(1f)) { st.setForceDarkPages(!st.forceDark) }
                     QTile(
-                        "Block ads", if (!page) "No page" else if (tab!!.shields) (if (tab.blocked > 0) "${tab.blocked} blocked" else "On") else "Off",
-                        page && tab!!.shields, Modifier.weight(1f), enabled = page
+                        "Block ads", if (!page) "No page" else if (!st.adOn) "Off in Settings" else if (tab!!.shields) (if (tab.blocked > 0) "${tab.blocked} blocked" else "On") else "Allowed here",
+                        page && st.adOn && tab!!.shields, Modifier.weight(1f), enabled = page
                     ) { st.setShields(tab!!, !tab.shields) }
                     QTile("Desktop", if (!page) "No page" else if (tab!!.desktop) "On" else "Off", page && tab!!.desktop, Modifier.weight(1f), enabled = page) {
                         setDesktop(tab!!, !tab.desktop)

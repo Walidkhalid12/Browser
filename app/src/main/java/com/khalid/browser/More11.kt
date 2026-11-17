@@ -290,10 +290,10 @@ private fun SiteInfoCard(st: BrowserState) {
     ) {
         Column(Modifier.weight(1f)) {
             T("Block ads & trackers", 16.sp, 600)
-            T(if (!tab.shields) "Off for this site" else if (tab.blocked == 1) "1 blocked on this page" else "${tab.blocked} blocked on this page",
+            T(if (!st.adOn) "Off in Settings" else if (!tab.shields) "Ads allowed on this site" else if (tab.blocked == 1) "1 blocked on this page" else "${tab.blocked} blocked on this page",
                 12.sp, 500, pal.fg.copy(alpha = 0.55f))
         }
-        CleanSwitch(tab.shields)
+        CleanSwitch(tab.shields && st.adOn)
     }
     val perms = remember(bump, tab.host) { st.site.perms(tab.host).sorted() }
     perms.forEach { p ->
