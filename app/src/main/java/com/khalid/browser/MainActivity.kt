@@ -71,6 +71,9 @@ import androidx.activity.addCallback
 import androidx.compose.animation.core.LinearEasing
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
+/** 2.0.0 (29): when the app's own last successful update check finished (elapsedRealtime); 0 = not yet in this run. */
+@Volatile var appCheckOkAt = 0L
+
 class MainActivity : ComponentActivity(), BrowserHost {
     private lateinit var st: BrowserState
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -118,8 +121,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
     private fun afterIntro(prefs: android.content.SharedPreferences) {
         if (isRobolectric) return
         Looper.myQueue().addIdleHandler { runCatching { WebSettings.getDefaultUserAgent(this) }; false }
-        // 1.0.5: every launch checks GitHub (at most every 30 min, only successful checks count).
-        Bg.main.postDelayed({ autoCheck() }, 1500L)
+        // 2.0.0 (29): the check on opening no longer waits for the intro; it is started from onCreate.
         // Background check for new versions with an "App updates" notification (1.0.5: re-set up on every launch).
         Bg.main.postDelayed({
             UpdateJob.channel(this)
@@ -162,14 +164,17 @@ class MainActivity : ComponentActivity(), BrowserHost {
     // 1.0.5: closing the home announcement only lasts until the app is opened again (not saved).
     override fun updateBannerClosed(version: String) {}
 
-    /** 1.0.5: automatic check when the app opens or comes back, unless a successful check ran in the last 30 min. */
-    private fun autoCheck() {
-        if (!::st.isInitialized) return
+    /**
+     * 2.0.0 (29): automatic check. [fresh] = the app was just opened (always asks GitHub); otherwise it came back
+     * to the front and asks again when the app's own last successful check is [Updater.RESUME_EVERY_MS] old.
+     * Before, both waited 30 min after ANY successful check, including the background job's "up to date", so a
+     * release that came out in between stayed hidden until "Check for updates" was tapped.
+     */
+    private fun autoCheck(fresh: Boolean) {
+        if (!::st.isInitialized || isDestroyed) return
         // A release the background check found while the app was away shows at once.
         if (st.update == null) Updater.cached(this, APP_VERSION)?.let { st.update = it }
-        if (isRobolectric) return
-        val last = getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE).getLong(Updater.K_CHECKED, 0L)
-        if (Updater.due(last, System.currentTimeMillis())) checkUpdates(manual = false)
+        if (fresh || Updater.due(appCheckOkAt, android.os.SystemClock.elapsedRealtime(), Updater.RESUME_EVERY_MS)) checkUpdates(manual = false)
     }
 
     @Volatile private var checking = false
@@ -186,12 +191,15 @@ class MainActivity : ComponentActivity(), BrowserHost {
             Updater.saveResult(app, r)
             Bg.main.post {
                 checking = false
+                if (r !is Updater.Check.Failed) appCheckOkAt = android.os.SystemClock.elapsedRealtime()
                 val asked = st.updateChecking
                 st.updateChecking = false
                 when (r) {
                     is Updater.Check.Newer -> {
                         st.update = r.info
                         st.updateStatus = "Browser ${r.info.version} is available"
+                        // 2.0.0 (29): every check in the app posts the notification too (once per version).
+                        UpdateJob.announce(app, r.info)
                         // The automatic check announces it with the home banner; a manual check opens the card.
                         if (manual || asked) st.card = Card.Update
                     }
@@ -320,6 +328,9 @@ class MainActivity : ComponentActivity(), BrowserHost {
         // frames of the animation (the "sometimes lags"); now it waits for the intro to finish.
         // Sign-in with a Google account is required once, on first launch.
         val gate = !isRobolectric
+        // 2.0.0 (29): every time the app opens it asks GitHub for a new version, right after the opening
+        // animation, whatever screen or card is showing (the network part runs on its own thread).
+        Bg.main.postDelayed({ autoCheck(fresh = true) }, 1800L)
 
         setContent {
             // 1.0.1: one shared clock for the opening animation; starts on the first drawn frame.
@@ -460,6 +471,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     override fun onStop() {
         super.onStop()
+        wasStopped = true
         if (!::st.isInitialized) return
         runCatching { st.persistState(filesDir) }
         runCatching { WidgetStats.save(this) }
@@ -499,8 +511,16 @@ class MainActivity : ComponentActivity(), BrowserHost {
         // widget tap first jumped to home and then to the widget's screen (two screen changes, one wasted
         // frame); in onResume the widget intent has already cleared leftByUser and opens straight away.
         // 1.0.5: coming back to the app (MIUI keeps it open in the background) also checks for updates.
-        if (::st.isInitialized && st.introDone) Bg.main.postDelayed({ autoCheck() }, 800L)
+        // 2.0.0 (29): it no longer needs the intro to have finished, and closing the Home card lasts until then.
+        if (::st.isInitialized && wasStopped) {
+            wasStopped = false
+            st.updateBannerClosed = null
+            Bg.main.postDelayed({ autoCheck(fresh = false) }, 800L)
+        }
     }
+
+    /** 2.0.0 (29): the app went to the background since it opened, so the next onStart is "coming back". */
+    private var wasStopped = false
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

@@ -119,6 +119,8 @@ You can check the file with its SHA-256, listed on the release page.
 
 On 1.0.4 or older? Install the latest version this way once. From 1.0.5 on, new versions show up inside the app.
 
+Installed 2.0.0 before November 18, 2026? Download Browser-2.0.0.apk again and install it over the old one once (your data stays). The new build checks for updates by itself every time you open the app.
+
 ## Build from source
 
 You need **JDK 17 or newer** and the **Android SDK** (platform 36, build tools 35.0.0). Android Studio includes both.

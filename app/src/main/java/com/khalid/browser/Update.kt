@@ -136,6 +136,10 @@ object Updater {
     // 1.0.5: the web page's "latest" redirect, used when the API is rate-limited or down (it has no hourly limit).
     private const val WEB = "https://github.com/$REPO"
 
+    /** 2.0.0 (29): where the checks go; only tests point these at a fake GitHub. */
+    @Volatile var apiUrl: String = API
+    @Volatile var webUrl: String = WEB
+
     /** 1.0.5: the API answer couldn't be used; [why] is the reason shown to the person if the fallback fails too. */
     private class ApiDown(val why: String) : Exception(why)
 
@@ -144,7 +148,7 @@ object Updater {
      * server error, no answer), it reads the release from github.com/…/releases/latest instead. [api] and [web] are
      * only changed by tests.
      */
-    fun check(current: String, api: String = API, web: String = WEB): Check {
+    fun check(current: String, api: String = apiUrl, web: String = webUrl): Check {
         val apiWhy = try {
             return fromApi(current, api)
         } catch (e: ApiDown) { e.why }
@@ -220,6 +224,9 @@ object Updater {
     // ---- 1.0.5: when to check ----
     /** Automatic checks (app opened or brought back) at most this often. Only successful checks count. */
     const val AUTO_EVERY_MS = 30L * 60 * 1000
+    /** 2.0.0 (29): coming back to the app checks again after this long. Opening it fresh always checks. Only the
+     * app's own successful checks count (the background job no longer pushes the next in-app check back). */
+    const val RESUME_EVERY_MS = 5L * 60 * 1000
     const val K_CHECKED = "update_ok_at"
 
     /** An automatic check is due when the last successful one is old enough (or the clock went back). */

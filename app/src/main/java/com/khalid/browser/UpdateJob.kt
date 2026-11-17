@@ -91,14 +91,19 @@ class UpdateJob : JobService() {
             when (r) {
                 is Updater.Check.Failed -> return false
                 is Updater.Check.UpToDate -> { clear(c); return true }
-                is Updater.Check.Newer -> {
-                    val prefs = c.getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE)
-                    if (!Updater.shouldNotify(r.info.version, APP_VERSION, prefs.getString(Updater.K_NOTIFIED, null))) return true
-                    if (!DlService.canNotify(c) || !NotificationManagerCompat.from(c).areNotificationsEnabled()) return true
-                    if (notify(c, r.info)) prefs.edit().putString(Updater.K_NOTIFIED, r.info.version).apply()
-                    return true
-                }
+                is Updater.Check.Newer -> { announce(c, r.info); return true }
             }
+        }
+
+        /** 2.0.0 (29): posts "Browser X is available" once per version. Used by the background job AND by the
+         * checks the app makes when it opens or comes back (before, only the background job could post it). */
+        fun announce(c: Context, u: UpdateInfo): Boolean {
+            val prefs = c.getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE)
+            if (!Updater.shouldNotify(u.version, APP_VERSION, prefs.getString(Updater.K_NOTIFIED, null))) return false
+            if (!DlService.canNotify(c) || !NotificationManagerCompat.from(c).areNotificationsEnabled()) return false
+            if (!notify(c, u)) return false
+            prefs.edit().putString(Updater.K_NOTIFIED, u.version).apply()
+            return true
         }
 
         fun notify(c: Context, u: UpdateInfo): Boolean = runCatching {
