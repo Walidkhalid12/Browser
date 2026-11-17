@@ -122,6 +122,13 @@ class MainActivity : ComponentActivity(), BrowserHost {
             val last = prefs.getLong("update_checked_at", 0L)
             if (System.currentTimeMillis() - last > Updater.AUTO_EVERY_MS) checkUpdates(manual = false)
         }, 1500L)
+        // 1.0.3: background check for new versions (about twice a day) with an "App updates" notification.
+        Bg.main.postDelayed({
+            UpdateJob.channel(this)
+            UpdateJob.schedule(this)
+            // Android 13+: ask once to show notifications, on a later launch (not on top of the first-launch cards).
+            if (prefs.getBoolean("asked_default", false) && st.card == null) askNotificationsOnce()
+        }, 4000L)
     }
 
     fun isDefaultBrowser(): Boolean = runCatching {
@@ -154,6 +161,10 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     override fun backToCaller() { moveTaskToBack(true) }
 
+    override fun updateBannerClosed(version: String) {
+        getSharedPreferences("browser", Context.MODE_PRIVATE).edit().putString(Updater.K_CLOSED, version).apply()
+    }
+
     override fun checkUpdates(manual: Boolean) {
         if (st.updateProgress >= 0f) { st.card = Card.Update; return }
         if (manual && st.update != null) { st.card = Card.Update; return }
@@ -165,19 +176,17 @@ class MainActivity : ComponentActivity(), BrowserHost {
                 when (r) {
                     is Updater.Check.Newer -> {
                         prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
+                        Updater.saveFound(this, r.json)
                         st.update = r.info
                         st.updateStatus = null
-                        // Automatic check: show the card once per version; "Later" then waits for Settings.
-                        val seen = prefs.getString("update_shown", null) == r.info.version
-                        if ((manual || !seen) && st.card == null) {
-                            st.card = Card.Update
-                            prefs.edit().putString("update_shown", r.info.version).apply()
-                        }
+                        // 1.0.3: the automatic check announces it with the home banner; a manual check opens the card.
+                        if (manual && st.card == null) st.card = Card.Update
                     }
                     is Updater.Check.UpToDate -> {
                         prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
                         st.update = null
                         st.updateStatus = "You're up to date ($APP_VERSION)"
+                        UpdateJob.clear(this)
                     }
                     is Updater.Check.Failed -> if (manual) st.updateStatus = r.why
                 }
@@ -263,6 +272,9 @@ class MainActivity : ComponentActivity(), BrowserHost {
         val email = prefs.getString("account_email", null)
         val account = email?.let { Account(it, prefs.getString("account_name", it) ?: it) }
         st = BrowserState(dark, Store(this), this, account)
+        // 1.0.3: a release found earlier (at launch or by the background check) shows its home banner right away.
+        st.update = Updater.cached(this, APP_VERSION)
+        st.updateBannerClosed = prefs.getString(Updater.K_CLOSED, null)
         currentState = st
         // Tabs come back exactly as they were (history and scroll) after the app was killed.
         // 1.0.0: the state files are read on a background thread (the app opens on home, so no page needs
@@ -384,7 +396,7 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     private fun handleIntent(i: Intent?) {
         // 0.8.0: home-screen widget buttons. Opening from a widget or a link is not "coming back", so skip the home reset.
-        if (i?.action in setOf(ACT_SEARCH, ACT_PRIVATE, ACT_DOWNLOADS, ACT_VOICE, Intent.ACTION_VIEW)) {
+        if (i?.action in setOf(ACT_SEARCH, ACT_PRIVATE, ACT_DOWNLOADS, ACT_VOICE, ACT_UPDATE, Intent.ACTION_VIEW)) {
             leftByUser = false
             // 0.9.9: a widget or a link always lands on a clean screen
             st.quick = false; st.card = null
@@ -394,6 +406,14 @@ class MainActivity : ComponentActivity(), BrowserHost {
             ACT_SEARCH -> { st.viewing = null; if (st.active?.blank != true) st.newTab(); st.screen = Screen.Search; return }
             ACT_PRIVATE -> { st.viewing = null; st.newTab(private = true); st.screen = Screen.Search; return }
             ACT_DOWNLOADS -> { st.viewing = null; st.openDownloads(Screen.Home); return }
+            // 1.0.3: the update notification opens the update card
+            ACT_UPDATE -> {
+                st.viewing = null
+                UpdateJob.clear(this)
+                if (st.update == null) st.update = Updater.cached(this, APP_VERSION)
+                if (st.update != null) st.card = Card.Update else checkUpdates(manual = true)
+                return
+            }
             ACT_VOICE -> {
                 st.viewing = null
                 if (st.active?.blank != true) st.newTab()
@@ -517,16 +537,41 @@ class MainActivity : ComponentActivity(), BrowserHost {
         }
     }
 
+    /**
+     * 1.0.3: hand a real app link (phone, email, maps, Play Store, app deep link) to its app.
+     * Web links never leave: an http/https target, or one another browser would open, comes back
+     * to Browser (or its web fallback). Returns false when no app opened it.
+     */
     override fun openExternal(url: String): Boolean = try {
         val intent = if (url.startsWith("intent:")) Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
             addCategory(Intent.CATEGORY_BROWSABLE); component = null; selector = null
-        } else Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        try { startActivity(intent); true }
-        catch (e: ActivityNotFoundException) {
-            // intent:// links often carry a web fallback
-            intent.getStringExtra("browser_fallback_url")?.let { st.open(it); true } ?: false
+        } else Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
+        val fallback = intent.getStringExtra("browser_fallback_url")?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val target = intent.data?.scheme?.lowercase()
+        when {
+            target == "http" || target == "https" -> { st.open(intent.dataString!!); true }
+            intent.`package` != null && intent.`package` in LinkRouter.BROWSER_PACKAGES -> fallback?.let { st.open(it); true } ?: false
+            opensInBrowser(intent) -> fallback?.let { st.open(it); true } ?: false
+            else -> try { startActivity(intent); true }
+            catch (e: ActivityNotFoundException) {
+                // intent:// links often carry a web fallback
+                fallback?.let { st.open(it); true } ?: false
+            }
         }
     } catch (e: Exception) { false }
+
+    /** True when the app that would open this is a web browser (other than Browser). */
+    private fun opensInBrowser(i: Intent): Boolean = runCatching {
+        val pkg = packageManager.resolveActivity(i, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+            ?: return@runCatching false
+        if (pkg == packageName || pkg == "android") return@runCatching false
+        if (pkg in LinkRouter.BROWSER_PACKAGES) return@runCatching true
+        val web = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")).addCategory(Intent.CATEGORY_BROWSABLE)
+        @Suppress("DEPRECATION")
+        val browsers = packageManager.queryIntentActivities(web, android.content.pm.PackageManager.MATCH_ALL).map { it.activityInfo.packageName }
+        // A browser that also owns this app link only counts if it is the generic web handler for this link too.
+        pkg in browsers && i.data?.scheme?.lowercase() !in setOf("tel", "mailto", "sms", "smsto", "geo", "market")
+    }.getOrDefault(false)
 
     override fun download(url: String, userAgent: String, contentDisposition: String, mime: String) {
         if (url.startsWith("blob:") || url.startsWith("data:")) {

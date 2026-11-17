@@ -125,6 +125,8 @@ interface BrowserHost {
     // ---- 1.0.1 ----
     /** Look for a newer release on GitHub. manual = the person tapped "Check for updates". */
     fun checkUpdates(manual: Boolean) {}
+    /** 1.0.3: remember that the home banner was closed for this version. */
+    fun updateBannerClosed(version: String) {}
     /** Download the update APK in the app, check it, then hand it to Android's installer. */
     fun installUpdate() {}
     /** Ask Android to make Browser the default browser. */
@@ -134,6 +136,9 @@ interface BrowserHost {
 }
 
 /** One browser tab. Its WebView is created the first time the tab is shown. */
+/** 1.0.3: placeholder address of a pop-up tab until its page starts loading. */
+const val POPUP_URL = "about:blank"
+
 class Tab(val id: Int, url: String, title: String, val private: Boolean, val uid: String = java.util.UUID.randomUUID().toString()) {
     var url by mutableStateOf(url)
     var title by mutableStateOf(title)
@@ -474,7 +479,7 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
         if (t.private) clearPrivateData(t)
         t.view = null; t.refresher = null
         tabs.remove(t)
-        if (!t.private && !t.blank) store.addRecent(t.url, t.title)
+        if (!t.private && !t.blank && !t.url.startsWith("about:")) store.addRecent(t.url, t.title)
         return ClosedTab(t.url, t.title, t.private, i, if (t.private) null else state, t.group, t.id == activeId)
     }
 
@@ -709,6 +714,26 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
 
     fun openInNewTab(input: String) { newTab(); open(input) }
 
+    /** 1.0.3: a tab for a pop-up or a target=_blank link. The page fills it, so it starts with no address to load. */
+    fun openPopupTab(from: Tab): Tab {
+        val t = newTab(POPUP_URL, from.private)
+        t.pending = null
+        t.title = "Loading\u2026"
+        t.openerId = from.id
+        t.progress = 5
+        screen = Screen.Home
+        return t
+    }
+
+    /** 1.0.3: the page closed its pop-up; the tab that opened it comes back. */
+    fun closePopupTab(t: Tab) {
+        val opener = tabs.firstOrNull { it.id == t.openerId }
+        val wasActive = t.id == activeId
+        close(t.id, undo = false)
+        if (wasActive && opener != null) activeId = opener.id
+        saveTabs()
+    }
+
     /** Open a link in a background-free new tab and show it. */
     fun openLinkInNewTab(url: String, private: Boolean) {
         val from = activeId
@@ -760,6 +785,14 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
     var updateStatus by mutableStateOf<String?>(null)
     var isDefault by mutableStateOf(false)
     var introDone by mutableStateOf(false)
+    /** 1.0.3: the version whose home banner was closed (it comes back for the next version). */
+    var updateBannerClosed by mutableStateOf<String?>(null)
+    fun closeUpdateBanner() {
+        val v = update?.version ?: return
+        updateBannerClosed = v
+        host.updateBannerClosed(v)
+        notify("You can update any time in More")
+    }
 
     fun leaveToHome() {
         val a = active ?: return

@@ -32,6 +32,8 @@ import java.security.MessageDigest
 /** 1.0.1: a release on GitHub, read from the Releases API. */
 class UpdateInfo(
     val version: String,
+    /** 1.0.3: the release title on GitHub (e.g. "Bug fixes"); empty when it only repeats the version. */
+    val name: String = "",
     val notes: String,
     val apkUrl: String,
     val apkName: String,
@@ -65,6 +67,43 @@ object Updater {
         .filter { it.isNotBlank() && !it.startsWith("SHA-256", true) && !it.startsWith("sha256", true) }
         .take(8).joinToString("\n")
 
+    /** 1.0.3: the release title, unless it only repeats the version ("v1.0.3", "Browser 1.0.3"). */
+    fun releaseName(name: String, tag: String): String {
+        val n = name.trim()
+        val v = tag.trim().removePrefix("v").removePrefix("V")
+        if (n.isEmpty()) return ""
+        val bare = n.removePrefix("Browser").trim().removePrefix("v").removePrefix("V").trim()
+        return if (bare == v || n == tag) "" else n.take(60)
+    }
+
+    /** 1.0.3: notes worth a separate box (not just the release title again). */
+    fun extraNotes(u: UpdateInfo): String =
+        if (u.notes.trim().removePrefix("\u2022 ").trim().equals(u.name, ignoreCase = true)) "" else u.notes
+
+    /** 1.0.3: the home banner shows for a newer version until it is closed; closing it holds only for that version. */
+    fun showBanner(found: UpdateInfo?, current: String, closedFor: String?): Boolean =
+        found != null && compare(found.version, current) > 0 && closedFor != found.version
+
+    /** 1.0.3: one system notification per version. */
+    fun shouldNotify(found: String, current: String, notifiedFor: String?): Boolean =
+        compare(found, current) > 0 && notifiedFor != found
+
+    // 1.0.3: the last release found is kept, so the banner is there at launch and after the background check.
+    const val PREFS = "browser"
+    const val K_JSON = "update_json"
+    const val K_CLOSED = "update_banner_closed"
+    const val K_NOTIFIED = "update_notified"
+
+    fun saveFound(ctx: Context, json: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(K_JSON, json).apply()
+    }
+    /** The release found earlier, if it is still newer than this app. */
+    fun cached(ctx: Context, current: String): UpdateInfo? {
+        val json = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(K_JSON, null) ?: return null
+        val u = runCatching { parse(json) }.getOrNull() ?: return null
+        return u.takeIf { compare(it.version, current) > 0 }
+    }
+
     /** Parse the API answer. Null when there is no APK attached. */
     fun parse(json: String): UpdateInfo? {
         val o = JSONObject(json)
@@ -77,6 +116,7 @@ object Updater {
             val digest = a.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:")?.lowercase()
             return UpdateInfo(
                 version = o.optString("tag_name").removePrefix("v"),
+                name = releaseName(o.optString("name"), o.optString("tag_name")),
                 notes = plainNotes(o.optString("body")),
                 apkUrl = a.optString("browser_download_url"),
                 apkName = name,
@@ -89,7 +129,7 @@ object Updater {
     }
 
     sealed class Check {
-        class Newer(val info: UpdateInfo) : Check()
+        class Newer(val info: UpdateInfo, val json: String = "") : Check()
         object UpToDate : Check()
         class Failed(val why: String) : Check()
     }
@@ -103,8 +143,9 @@ object Updater {
             c.setRequestProperty("User-Agent", "Browser/$current (Android)")
             when (val code = c.responseCode) {
                 200 -> {
-                    val info = parse(c.inputStream.bufferedReader().use { it.readText() }) ?: return Check.UpToDate
-                    if (compare(info.version, current) > 0) Check.Newer(info) else Check.UpToDate
+                    val json = c.inputStream.bufferedReader().use { it.readText() }
+                    val info = parse(json) ?: return Check.UpToDate
+                    if (compare(info.version, current) > 0) Check.Newer(info, json) else Check.UpToDate
                 }
                 403, 429 -> Check.Failed("GitHub is busy, try again later")
                 404 -> Check.UpToDate
@@ -192,6 +233,48 @@ object Updater {
 
 // ---------------- cards ----------------
 
+/**
+ * 1.0.3: the update announcement on the home screen. A quiet pill above the bottom bar with the version and
+ * the release title; "Update" opens the update card and starts the download, the cross hides it for this version.
+ */
+@Composable
+fun UpdateBanner(st: BrowserState, modifier: Modifier = Modifier) {
+    val pal = LocalPal.current
+    val u = st.update ?: return
+    if (!Updater.showBanner(u, APP_VERSION, st.updateBannerClosed)) return
+    val busy = st.updateProgress >= 0f
+    Row(
+        modifier
+            .enterUp(0, 80)
+            .padding(start = 14.dp, end = 14.dp, bottom = 10.dp)
+            .fillMaxWidth()
+            .squish(0.98f) { st.card = Card.Update }
+            .height(64.dp).clip(RoundedCornerShape(32.dp)).background(pal.soft)
+            .padding(start = 8.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(pal.fg), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(12.dp).clip(CircleShape).background(pal.soft))
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            T("Browser ${u.version} is available", 15.sp, 600)
+            Spacer(Modifier.height(2.dp))
+            T(if (busy) "Downloading ${(st.updateProgress * 100).toInt()}%" else u.name.ifBlank { "Tap to see what's new" }, 12.sp, 500, pal.fg.copy(alpha = 0.6f))
+        }
+        Box(
+            Modifier.squish(0.94f) { st.card = Card.Update; st.host.installUpdate() }
+                .height(40.dp).clip(RoundedCornerShape(20.dp)).background(pal.fg).padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) { T("Update", 14.sp, 700, pal.bg) }
+        Spacer(Modifier.width(4.dp))
+        Box(
+            Modifier.squish(0.9f) { st.closeUpdateBanner() }.size(40.dp).clip(CircleShape),
+            contentAlignment = Alignment.Center
+        ) { Glyph(G.Close, pal.fg.copy(alpha = 0.55f), 16.dp) }
+    }
+}
+
 @Composable
 fun UpdateCard(st: BrowserState) {
     val pal = LocalPal.current
@@ -206,13 +289,14 @@ fun UpdateCard(st: BrowserState) {
             Column(Modifier.weight(1f)) {
                 T("Browser ${u.version} is here", 17.sp, 700)
                 Spacer(Modifier.height(3.dp))
-                T("You have $APP_VERSION" + if (u.apkSize > 0) " · ${"%.1f".format(u.apkSize / 1048576f)} MB" else "", 13.sp, 500, pal.fg.copy(alpha = 0.6f))
+                T((if (u.name.isNotBlank()) "${u.name} · " else "") + "You have $APP_VERSION" + if (u.apkSize > 0) " · ${"%.1f".format(u.apkSize / 1048576f)} MB" else "", 13.sp, 500, pal.fg.copy(alpha = 0.6f))
             }
         }
-        if (u.notes.isNotBlank()) {
+        val notes = Updater.extraNotes(u)
+        if (notes.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(pal.soft).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                TM(u.notes, 14.sp, 500, pal.fg.copy(alpha = 0.8f))
+                TM(notes, 14.sp, 500, pal.fg.copy(alpha = 0.8f))
             }
         }
         Spacer(Modifier.height(12.dp))

@@ -11,8 +11,8 @@
 <p align="center"><b>A clean, black-and-white Android browser with smooth motion and downloads done right.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.2/Browser-1.0.2.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-v1.0.2-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
+  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.3/Browser-1.0.3.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-v1.0.3-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
   </a>
 </p>
 
@@ -85,9 +85,11 @@ It's free, open source, and only about 2 MB.
 **Tabs and tools**
 - Undo close, recently closed tabs, and tabs that come back after the app is closed.
 - Open links in the background or in a private tab.
+- Every link stays in Browser: pop-ups and links that open a new window open as a new tab, never in another browser. Pop-ups a page opens on its own are blocked.
 - Reader mode, translate, site info, QR code for any page, add to home screen, save as PDF, desktop mode and text size per site.
 - Background audio and video, picture-in-picture, and full-screen video that turns to landscape.
 - Home-screen widgets: search bar, quick actions, top sites, ads blocked, and the dot.
+- Updates inside the app: a card on the home screen and an "App updates" notification when a new version is out, then one tap downloads it, checks it and installs it.
 
 ## Why it's different
 
@@ -103,7 +105,7 @@ It's free, open source, and only about 2 MB.
 
 ## Install
 
-1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.2.apk**.
+1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.3.apk**.
 2. Open the file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 4. **Play Protect** may warn you because the app isn't from the Play Store. Tap **More details**, then **Install anyway**.

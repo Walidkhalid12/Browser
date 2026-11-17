@@ -44,6 +44,9 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
         displayZoomControls = false
         setSupportZoom(true)
         mediaPlaybackRequiresUserGesture = true
+        // 1.0.3: new windows come to onCreateWindow (opened as tabs) instead of leaving the app.
+        setSupportMultipleWindows(true)
+        javaScriptCanOpenWindowsAutomatically = true
         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         if (tab.private) cacheMode = WebSettings.LOAD_NO_CACHE
         // Smoother scrolling: tiles just outside the screen are drawn ahead of time.
@@ -96,11 +99,17 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
     wv.setFindListener { active, count, done -> if (done) { st.findCount = count; st.findAt = if (count == 0) 0 else active + 1 } }
 
     wv.webViewClient = object : WebViewClient() {
+        // 1.0.3: every web link stays in Browser (see LinkRouter); only real app links leave, when tapped.
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-            val u = request.url
-            return when (u.scheme?.lowercase()) {
-                "http", "https", "about", "data", "blob", "javascript", "file" -> false
-                else -> { st.host.openExternal(u.toString()); true }
+            val url = request.url.toString()
+            return when (val r = LinkRouter.route(url, request.hasGesture(), request.isRedirect, request.isForMainFrame)) {
+                LinkRoute.Stay -> false
+                LinkRoute.Block -> true
+                is LinkRoute.InApp -> { view.loadUrl(r.url); true }
+                is LinkRoute.External -> {
+                    if (!st.host.openExternal(r.url)) r.fallback?.let { view.loadUrl(it) }
+                    true
+                }
             }
         }
         // Ads and trackers: third-party requests to listed hosts get an empty answer.
@@ -172,6 +181,25 @@ private fun createWebView(ctx0: Context, st: BrowserState, tab: Tab): WebView {
         }
     }
     wv.webChromeClient = object : WebChromeClient() {
+        // 1.0.3: pop-ups and new-window links (target=_blank, window.open) open as a new tab in Browser,
+        // never in another browser. Pop-ups a page opens on its own, without a tap, are blocked.
+        override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
+            if (!isUserGesture) {
+                if (tab.id == st.activeId) st.notify("Pop-up blocked")
+                return false
+            }
+            val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+            val t = st.openPopupTab(tab)
+            val nw = createWebView(ctx0, st, t)
+            t.view = nw
+            transport.webView = nw
+            resultMsg.sendToTarget()
+            return true
+        }
+        // The page closed its pop-up (window.close, e.g. after a sign-in): close that tab and go back.
+        override fun onCloseWindow(window: WebView) {
+            st.tabs.firstOrNull { it.view === window }?.let { st.closePopupTab(it) }
+        }
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             val before = tab.progress
             tab.progress = newProgress

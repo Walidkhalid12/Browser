@@ -1,6 +1,7 @@
 package com.khalid.browser
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -25,6 +26,46 @@ class V101Test {
     private fun settle(ms: Long = 1200) { rule.mainClock.advanceTimeBy(ms); rule.waitForIdle() }
 
     private fun back() { rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }; settle(600) }
+
+    // 1.0.3: the version the updater compares must be the app's real version (1.0.2 still said 1.0.1)
+    @Test fun appVersionMatchesTheBuild() {
+        val a = rule.activity
+        assertEquals(a.packageManager.getPackageInfo(a.packageName, 0).versionName, APP_VERSION)
+    }
+
+    // 1.0.3: the update banner shows on Home, and closing it holds for that version only
+    @Test fun updateBannerOnHome() {
+        settle(2000)
+        val st = currentState!!
+        rule.runOnUiThread {
+            st.updateBannerClosed = null
+            st.update = UpdateInfo("9.9.9", "Bug fixes", "Bug fixes", "u", "Browser-9.9.9.apk", 1, null, "p")
+        }
+        settle()
+        assertEquals(1, rule.onAllNodesWithText("Browser 9.9.9 is available").fetchSemanticsNodes().size)
+        assertEquals(1, rule.onAllNodesWithText("Bug fixes").fetchSemanticsNodes().size)
+        rule.runOnUiThread { st.closeUpdateBanner() }; settle()
+        assertEquals(0, rule.onAllNodesWithText("Browser 9.9.9 is available").fetchSemanticsNodes().size)
+        rule.runOnUiThread { st.update = UpdateInfo("9.9.10", "", "", "u", "a.apk", 1, null, "p") }; settle()
+        assertEquals(1, rule.onAllNodesWithText("Browser 9.9.10 is available").fetchSemanticsNodes().size)
+    }
+
+    // 1.0.3: a pop-up opens as a new tab in Browser, and when the page closes it the opener comes back
+    @Test fun popupOpensAsTabAndClosesBack() {
+        settle(2000)
+        val st = currentState!!
+        rule.runOnUiThread { st.open("https://example.com/a") }; settle()
+        val opener = st.active!!
+        val before = st.tabs.size
+        lateinit var pop: Tab
+        rule.runOnUiThread { pop = st.openPopupTab(opener) }; settle()
+        assertEquals(before + 1, st.tabs.size)
+        assertEquals(pop.id, st.activeId)
+        assertEquals(opener.id, pop.openerId)
+        rule.runOnUiThread { st.closePopupTab(pop) }; settle()
+        assertEquals(before, st.tabs.size)
+        assertEquals(opener.id, st.activeId)
+    }
 
     @Test fun backGoesOneStepLikeChrome() {
         settle(2000)

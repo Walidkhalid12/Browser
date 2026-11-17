@@ -91,6 +91,8 @@ fun Home05(st: BrowserState) {
         })
         AiModeBar(st, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 16.dp))
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            // 1.0.3: update announcement, above "Back to previous tab"
+            UpdateBanner(st)
             if (back != null) BackBar(st, back)
             BottomBar(st, Modifier, compact = false)
         }
