@@ -7,7 +7,7 @@ import android.os.Parcel
 import java.net.URLEncoder
 import java.util.Locale
 
-const val APP_VERSION = "1.0.5"
+const val APP_VERSION = "2.0.0"
 
 // =====================================================================
 // Search shortcuts: "@yt cats" searches YouTube, "@w", "@gh", "@maps", "@x"

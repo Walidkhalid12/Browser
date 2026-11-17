@@ -20,8 +20,8 @@ android {
         applicationId = "com.khalid.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 27
-        versionName = "1.0.5"
+        versionCode = 28
+        versionName = "2.0.0"
     }
     signingConfigs {
         if (keystoreProps.getProperty("storeFile") != null) {
