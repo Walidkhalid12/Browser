@@ -11,8 +11,8 @@
 <p align="center"><b>A clean, black-and-white Android browser with smooth motion and downloads done right.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.0/Browser-1.0.0.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-v1.0.0-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
+  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.1/Browser-1.0.1.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-v1.0.1-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
   </a>
 </p>
 
@@ -99,7 +99,7 @@ It's free, open source, and only about 2 MB.
 
 ## Install
 
-1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.0.apk**.
+1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.1.apk**.
 2. Open the file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 4. **Play Protect** may warn you because the app isn't from the Play Store. Tap **More details**, then **Install anyway**.
