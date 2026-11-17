@@ -183,11 +183,17 @@ private fun WidgetDot(st: BrowserState, size: () -> Dp, modifier: Modifier) {
     val list = st.store.widgets.toList()
     val pager = rememberPagerState(initialPage = (st.store.str("dot_page")?.toIntOrNull() ?: 0).coerceIn(0, (list.size - 1).coerceAtLeast(0))) { list.size }
     LaunchedEffect(pager.currentPage) { st.store.setStr("dot_page", pager.currentPage.toString()) }
-    val pop = remember { Animatable(0.6f) }
-    LaunchedEffect(Unit) { pop.animateTo(1f, tween(380, easing = EaseOut)) }
+    // 1.0.1: the dot's pop reads the shared opening clock (starts after the first frame), not its own timer.
+    val intro = LocalIntro.current
+    val shared = remember { intro != null && !intro.done }
+    val pop = remember { Animatable(if (shared) 1f else 0.6f) }
+    LaunchedEffect(Unit) { if (!shared) pop.animateTo(1f, tween(380, easing = EaseOut)) }
     val haptic = LocalHapticFeedback.current
     Box(
-        modifier.sizeOf(size).graphicsLayer { scaleX = pop.value; scaleY = pop.value; alpha = ((pop.value - 0.6f) / 0.4f).coerceIn(0f, 1f) }
+        modifier.sizeOf(size).graphicsLayer {
+            val pv = if (shared && intro != null) 0.6f + 0.4f * EaseOut.transform((intro.t.value / 380f).coerceIn(0f, 1f)) else pop.value
+            scaleX = pv; scaleY = pv; alpha = ((pv - 0.6f) / 0.4f).coerceIn(0f, 1f)
+        }
             .clip(CircleShape).background(pal.fg)
     ) {
         HorizontalPager(pager, Modifier.fillMaxSize(), key = { list.getOrElse(it) { "x$it" } }) { p ->

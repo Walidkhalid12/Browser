@@ -67,6 +67,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
+import androidx.activity.addCallback
+import androidx.compose.animation.core.LinearEasing
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 class MainActivity : ComponentActivity(), BrowserHost {
     private lateinit var st: BrowserState
@@ -102,6 +105,131 @@ class MainActivity : ComponentActivity(), BrowserHost {
     private var videoW = 0
     private var videoH = 0
 
+    // ---------------- 1.0.1 ----------------
+    @Volatile private var firstFrameDrawn = false
+    private var pendingUpdate: java.io.File? = null
+    private val roleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        st.isDefault = isDefaultBrowser()
+        if (st.isDefault) st.notify("Browser is now your default browser")
+        else if (r.resultCode != RESULT_OK) openDefaultAppsSettings(quiet = true)
+    }
+
+    /** Work that used to run during the opening animation, now started right after it. */
+    private fun afterIntro(prefs: android.content.SharedPreferences) {
+        if (isRobolectric) return
+        Looper.myQueue().addIdleHandler { runCatching { WebSettings.getDefaultUserAgent(this) }; false }
+        Bg.main.postDelayed({
+            val last = prefs.getLong("update_checked_at", 0L)
+            if (System.currentTimeMillis() - last > Updater.AUTO_EVERY_MS) checkUpdates(manual = false)
+        }, 1500L)
+    }
+
+    fun isDefaultBrowser(): Boolean = runCatching {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val rm = getSystemService(android.app.role.RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) return@runCatching rm.isRoleHeld(android.app.role.RoleManager.ROLE_BROWSER)
+        }
+        val r = packageManager.resolveActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        r?.activityInfo?.packageName == packageName
+    }.getOrDefault(false)
+
+    override fun makeDefault() {
+        if (isDefaultBrowser()) { st.isDefault = true; st.notify("Browser is already your default"); return }
+        if (Build.VERSION.SDK_INT >= 29) {
+            val rm = getSystemService(android.app.role.RoleManager::class.java)
+            if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_BROWSER)) {
+                ownLaunchAt = android.os.SystemClock.uptimeMillis()
+                runCatching { roleLauncher.launch(rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_BROWSER)); return }
+            }
+        }
+        openDefaultAppsSettings(quiet = false)
+    }
+
+    private fun openDefaultAppsSettings(quiet: Boolean) {
+        // Older Android, or a phone that hides the system ask (some MIUI builds): the Default apps screen.
+        val ok = runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }.isSuccess ||
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }.isSuccess
+        if (ok) st.notify("Choose Browser under Browser app") else if (!quiet) st.notify("Set it in Settings, Apps, Default apps")
+    }
+
+    override fun backToCaller() { moveTaskToBack(true) }
+
+    override fun checkUpdates(manual: Boolean) {
+        if (st.updateProgress >= 0f) { st.card = Card.Update; return }
+        if (manual && st.update != null) { st.card = Card.Update; return }
+        if (manual) st.updateStatus = "Checking\u2026"
+        val prefs = getSharedPreferences("browser", Context.MODE_PRIVATE)
+        Bg.run {
+            val r = Updater.check(APP_VERSION)
+            Bg.main.post {
+                when (r) {
+                    is Updater.Check.Newer -> {
+                        prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
+                        st.update = r.info
+                        st.updateStatus = null
+                        // Automatic check: show the card once per version; "Later" then waits for Settings.
+                        val seen = prefs.getString("update_shown", null) == r.info.version
+                        if ((manual || !seen) && st.card == null) {
+                            st.card = Card.Update
+                            prefs.edit().putString("update_shown", r.info.version).apply()
+                        }
+                    }
+                    is Updater.Check.UpToDate -> {
+                        prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
+                        st.update = null
+                        st.updateStatus = "You're up to date ($APP_VERSION)"
+                    }
+                    is Updater.Check.Failed -> if (manual) st.updateStatus = r.why
+                }
+            }
+        }
+    }
+
+    override fun installUpdate() {
+        val u = st.update ?: return
+        if (st.updateProgress >= 0f) return
+        st.updateProgress = 0f
+        st.updateStatus = null
+        val app = applicationContext
+        Bg.run {
+            val res = runCatching {
+                val f = Updater.download(app, u) { p -> Bg.main.post { if (st.updateProgress >= 0f) st.updateProgress = p } }
+                Updater.verify(app, f)?.let { why -> f.delete(); throw IllegalStateException(why) }
+                f
+            }
+            Bg.main.post {
+                res.onSuccess { f ->
+                    if (!packageManager.canRequestPackageInstalls()) {
+                        // First time only: Android asks to allow Browser to install apps. We continue on return.
+                        pendingUpdate = f
+                        st.notify("Turn on \"Allow from this source\", then come back")
+                        runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
+                            .onFailure { st.updateProgress = -1f; st.updateStatus = "Allow Browser to install apps in Settings" }
+                    } else launchInstaller(f)
+                }.onFailure { e ->
+                    st.updateProgress = -1f
+                    st.updateStatus = (e.message?.takeIf { it.isNotBlank() && e !is java.io.IOException } ?: "Download failed. Check your connection")
+                }
+            }
+        }
+    }
+
+    /** Hand the checked APK to Android's own installer; the person confirms there. */
+    private fun launchInstaller(f: java.io.File) {
+        val uri = runCatching { androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f) }.getOrNull()
+        if (uri == null || !f.exists()) { st.updateProgress = -1f; st.updateStatus = "Download failed. Try again"; return }
+        st.card = null
+        st.updateProgress = -1f
+        st.updateStatus = "Ready to install"
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, APK)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { startActivity(view) } catch (e: ActivityNotFoundException) {
+            @Suppress("DEPRECATION")
+            runCatching { startActivity(Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                .onFailure { st.notify("This phone has no app installer") }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 1.0.0: open the other preference files now; Android parses each on its own thread,
         // so they are ready (or nearly) by the time Store and SitePrefs read them below.
@@ -114,9 +242,22 @@ class MainActivity : ComponentActivity(), BrowserHost {
         if (prev !is CrashSaver) Thread.setDefaultUncaughtExceptionHandler(CrashSaver(crashFile, prev))
         val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         val dark = if (prefs.contains("dark")) prefs.getBoolean("dark", false) else systemDark
-        window.setBackgroundDrawable(ColorDrawable(if (dark) AColor.BLACK else AColor.WHITE))
+        // 1.0.1: real launch screen (Android 12+ system splash, same look on 8-11 through the compat library).
+        // It stays until the first frame of the app is fully drawn, so the opening animation never starts
+        // on a half-built screen, then fades out in 150 ms.
+        val splash = installSplashScreen()
+        val created = android.os.SystemClock.uptimeMillis()
+        // Safety net: never hold the launch screen longer than 1.2 s, even if a frame is slow.
+        if (!isRobolectric) splash.setKeepOnScreenCondition { !firstFrameDrawn && android.os.SystemClock.uptimeMillis() - created < 1200 }
+        splash.setOnExitAnimationListener { v ->
+            v.view.animate().alpha(0f).setDuration(150L).withEndAction { v.remove() }.start()
+        }
+        window.setBackgroundDrawable(ColorDrawable(if (dark) DARK_BG else AColor.WHITE))
         applyBars(dark)
         super.onCreate(savedInstanceState)
+        // 1.0.1: on Android 8-11 a Back on the empty home used to close the app completely, so the next
+        // open was a slow cold start. Now Browser just goes to the background (Android 12+ already does this).
+        if (Build.VERSION.SDK_INT < 31) onBackPressedDispatcher.addCallback(this) { moveTaskToBack(true) }
         runCatching { preferHighestRefreshRate() }
 
         val email = prefs.getString("account_email", null)
@@ -146,15 +287,26 @@ class MainActivity : ComponentActivity(), BrowserHost {
         handleIntent(intent)
         ContextCompat.registerReceiver(this, doneReceiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED)
         // Load the web engine while the app is idle, so the first page opens faster.
-        if (!isRobolectric) Looper.myQueue().addIdleHandler { runCatching { WebSettings.getDefaultUserAgent(this) }; false }
+        // 1.0.1: only AFTER the opening animation. Before, this 100-300 ms job could land between two
+        // frames of the animation (the "sometimes lags"); now it waits for the intro to finish.
         // Sign-in with a Google account is required once, on first launch.
         val gate = !isRobolectric
 
         setContent {
+            // 1.0.1: one shared clock for the opening animation; starts on the first drawn frame.
+            val intro = remember { IntroClock() }
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                firstFrameDrawn = true
+                intro.t.animateTo(INTRO_MS.toFloat(), tween(INTRO_MS, easing = LinearEasing))
+                intro.done = true
+                st.introDone = true
+                afterIntro(prefs)
+            }
             LaunchedEffect(st.dark) {
                 applyBars(st.dark)
                 prefs.edit().putBoolean("dark", st.dark).apply()
-                window.setBackgroundDrawable(ColorDrawable(if (st.dark) AColor.BLACK else AColor.WHITE))
+                window.setBackgroundDrawable(ColorDrawable(if (st.dark) DARK_BG else AColor.WHITE))
             }
             LaunchedEffect(st.textZoom) { prefs.edit().putInt("text_zoom", st.textZoom).apply() }
             LaunchedEffect(st.webSignedIn) { prefs.edit().putBoolean("web_signed_in", st.webSignedIn).apply() }
@@ -167,7 +319,17 @@ class MainActivity : ComponentActivity(), BrowserHost {
                 transitionSpec = { fadeIn(tween(320, easing = EaseOut)) togetherWith fadeOut(tween(200)) },
                 label = "gate"
             ) { need ->
-                if (need) SignInScreen(st) else BrowserApp(st)
+                CompositionLocalProvider(LocalIntro provides intro) {
+                    if (need) SignInScreen(st) else BrowserApp(st)
+                }
+            }
+            // 1.0.1: first launch only (after sign-in): offer to become the default browser, once.
+            LaunchedEffect(needSignIn, st.introDone) {
+                if (!isRobolectric && !needSignIn && st.introDone && !prefs.getBoolean("asked_default", false)) {
+                    kotlinx.coroutines.delay(600)
+                    prefs.edit().putBoolean("asked_default", true).apply()
+                    if (!st.isDefault && st.card == null) st.card = Card.DefaultBrowser
+                }
             }
         }
     }
@@ -217,6 +379,8 @@ class MainActivity : ComponentActivity(), BrowserHost {
         if (i.action == Intent.ACTION_VIEW && (data.scheme == "http" || data.scheme == "https")) {
             val a = st.active
             if (a != null && a.blank) st.open(data.toString()) else st.openInNewTab(data.toString())
+            // 1.0.1: Back on this page's first step returns to the app the link came from (like Chrome).
+            st.active?.fromApp = true
         }
     }
 
@@ -244,7 +408,17 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     override fun onResume() {
         super.onResume()
-        if (::st.isInitialized) st.active?.view?.onResume()
+        if (::st.isInitialized && leftByUser) {
+            leftByUser = false
+            val t = st.active
+            if (!st.pip && t != null && !t.mediaPlaying && st.fullView == null) st.leaveToHome()
+        }
+        if (::st.isInitialized) { st.active?.view?.onResume(); st.isDefault = isDefaultBrowser() }
+        pendingUpdate?.let { f ->
+            pendingUpdate = null
+            if (packageManager.canRequestPackageInstalls()) launchInstaller(f)
+            else { st.updateProgress = -1f; st.updateStatus = "Allow \"Install unknown apps\" for Browser to update"; if (st.update != null) st.card = Card.Update }
+        }
         // Back from "Install unknown apps": continue the install that was waiting.
         pendingInstall?.let { f ->
             pendingInstall = null
@@ -258,12 +432,9 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     override fun onStart() {
         super.onStart()
-        if (!::st.isInitialized) return
-        if (leftByUser) {
-            leftByUser = false
-            val t = st.active
-            if (!st.pip && t != null && !t.mediaPlaying && st.fullView == null) st.leaveToHome()
-        }
+        // 1.0.1: the "came back, show home" reset moved to onResume. onStart runs BEFORE onNewIntent, so a
+        // widget tap first jumped to home and then to the widget's screen (two screen changes, one wasted
+        // frame); in onResume the widget intent has already cleared leftByUser and opens straight away.
     }
 
     override fun onUserLeaveHint() {
@@ -730,8 +901,8 @@ fun BrowserApp(st: BrowserState) {
     val scope = rememberCoroutineScope()
     val sheets = remember {
         mapOf(
-            Screen.Search to SheetAnim(), Screen.Tabs to SheetAnim(), Screen.More to SheetAnim(),
-            Screen.Lists to SheetAnim(), Screen.Downloads to SheetAnim(), Screen.Reader to SheetAnim()
+            Screen.Search to SheetAnim(0), Screen.Tabs to SheetAnim(1), Screen.More to SheetAnim(2),
+            Screen.Downloads to SheetAnim(3), Screen.Lists to SheetAnim(4), Screen.Reader to SheetAnim(5)
         )
     }
     val goHome = remember { { st.screen = Screen.Home } }
@@ -749,9 +920,16 @@ fun BrowserApp(st: BrowserState) {
         if (st.finding) { st.finding = false }
     }
     BackHandler(enabled = st.link != null) { st.link = null }
-    BackHandler(enabled = st.link == null && st.screen == Screen.Home && (st.fullView != null || st.active?.canBack == true)) {
-        if (st.fullView != null) st.fullCallback?.onCustomViewHidden()
-        else st.active?.view?.goBack()
+    // 1.0.1: Back while a page is open works like Chrome. Full-screen video and the find bar close first,
+    // then exactly ONE step back in this tab's history (read live from the WebView, so it never relies on a
+    // flag that can be a page behind). With no history left: back to the tab or app that opened the page,
+    // else to home. It stays on as long as a page is in front, so Back can't fall through and close the app.
+    BackHandler(enabled = st.link == null && st.screen == Screen.Home && (st.fullView != null || st.active?.blank == false)) {
+        when {
+            st.fullView != null -> st.fullCallback?.onCustomViewHidden()
+            st.finding -> st.finding = false
+            else -> st.pageBack()
+        }
     }
     PredictiveBackHandler(enabled = st.link == null && st.screen != Screen.Home) { flow ->
         val sh = sheets[st.screen] ?: return@PredictiveBackHandler
@@ -868,3 +1046,4 @@ class CrashSaver(private val f: java.io.File, private val next: Thread.UncaughtE
         next?.uncaughtException(t, e)
     }
 }
+

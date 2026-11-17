@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -56,9 +58,10 @@ object Motion {
 /** Progress of the sheet an element lives in, or null outside sheets. Read only inside draw/layer blocks. */
 val LocalReveal = staticCompositionLocalOf<(() -> Float)?> { null }
 
-class SheetAnim {
+class SheetAnim(val order: Int = 0) {
     val p = Animatable(0f)
 }
+private fun warmOrder(s: SheetAnim) = s.order
 
 /** Drag down at the top of any list in the sheet to close it. */
 private class DragToClose(
@@ -105,8 +108,15 @@ fun Sheet(
     LaunchedEffect(open) { sheet.p.animateTo(if (open) 1f else 0f, if (open) Motion.open else Motion.close) }
     val shown by remember(open) { derivedStateOf { open || sheet.p.value > 0.001f } }
     // compose once shortly after launch so the first open is instant
+    // 1.0.1: before, all six sheets were composed together 0.5 s after launch, in the middle of the opening
+    // animation (one big frame = the "sometimes lags"). Now each waits until the opening is over, then they
+    // are built one per ~120 ms.
     var warm by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { delay(500); warm = true }
+    val intro = LocalIntro.current
+    LaunchedEffect(Unit) {
+        if (intro != null) { snapshotFlow { intro.done }.first { it }; delay(120L + warmOrder(sheet) * 120L) } else delay(500)
+        warm = true
+    }
     if (!(warm || shown)) return
 
     var h by remember { mutableFloatStateOf(1f) }

@@ -229,7 +229,7 @@ private fun BottomCard(visible: Boolean, onDismiss: () -> Unit, content: @Compos
             exit = fadeOut(tween(150)) + slideOutVertically(tween(200)) { it / 4 }
         ) {
             Column(
-                Modifier.navigationBarsPadding().padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(pal.bg)
+                Modifier.navigationBarsPadding().padding(12.dp).fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(pal.raised)
                     .pointerInput(Unit) { detectTapGestures { } }
                     .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -261,6 +261,8 @@ fun Cards(st: BrowserState) {
             is Card.Group -> GroupCard(st, c.tabId)
             is Card.Widgets -> WidgetsCard(st)
             is Card.FileMenu -> FileMenuCard(st, c.d)
+            is Card.Update -> UpdateCard(st)
+            is Card.DefaultBrowser -> DefaultBrowserCard(st)
             null -> {}
         }
     }

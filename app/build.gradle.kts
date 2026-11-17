@@ -20,8 +20,8 @@ android {
         applicationId = "com.khalid.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        versionName = "1.0.0"
+        versionCode = 23
+        versionName = "1.0.1"
     }
     signingConfigs {
         if (keystoreProps.getProperty("storeFile") != null) {
@@ -53,6 +53,8 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
+    // 1.0.1: system launch screen on every Android version
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")

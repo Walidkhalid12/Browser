@@ -8,6 +8,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +60,10 @@ sealed class Card {
     class Group(val tabId: Int) : Card()
     object Widgets : Card()
     class FileMenu(val d: Dl) : Card()
+    /** 1.0.1: a newer Browser is on GitHub. */
+    object Update : Card()
+    /** 1.0.1: first launch only, offer to become the default browser. */
+    object DefaultBrowser : Card()
 }
 
 /** A file shown inside the browser (0.5.0 viewer). */
@@ -111,6 +116,15 @@ interface BrowserHost {
     fun retryDownload(d: Dl) {}
     /** Pick any file on the phone and show it in the browser. */
     fun pickAnyFile() {}
+    // ---- 1.0.1 ----
+    /** Look for a newer release on GitHub. manual = the person tapped "Check for updates". */
+    fun checkUpdates(manual: Boolean) {}
+    /** Download the update APK in the app, check it, then hand it to Android's installer. */
+    fun installUpdate() {}
+    /** Ask Android to make Browser the default browser. */
+    fun makeDefault() {}
+    /** Leave Browser and go back to the app that opened the link. */
+    fun backToCaller() {}
 }
 
 /** One browser tab. Its WebView is created the first time the tab is shown. */
@@ -120,6 +134,10 @@ class Tab(val id: Int, url: String, title: String, val private: Boolean, val uid
     var progress by mutableIntStateOf(100)
     var canBack by mutableStateOf(false)
     var canForward by mutableStateOf(false)
+    /** 1.0.1: the tab this one was opened from ("Open in new tab"); Back with no history returns there. */
+    var openerId: Int = -1
+    /** 1.0.1: opened by a link from another app; Back with no history returns to that app. */
+    var fromApp: Boolean = false
     var thumb by mutableStateOf<ImageBitmap?>(null)
     var view: WebView? = null
     /** URL to load once the WebView exists. */
@@ -687,7 +705,8 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
 
     /** Open a link in a background-free new tab and show it. */
     fun openLinkInNewTab(url: String, private: Boolean) {
-        newTab(toUrl(url), private)
+        val from = activeId
+        newTab(toUrl(url), private).openerId = from
         screen = Screen.Home
     }
 
@@ -700,6 +719,42 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
     val backTab: Tab? get() = backTo?.let { id -> tabs.firstOrNull { it.id == id } }?.takeIf { it.id != activeId && !it.blank }
 
     /** Show the home page in front. The page that was open stays as a tab. */
+    /**
+     * 1.0.1: Back while a page is in front, like Chrome. Exactly one step back in this tab's history.
+     * Only when there is none left: a tab opened from another tab closes and that tab comes back, a tab
+     * opened from another app closes and that app comes back, any other page goes to the home screen.
+     * Returns false only when there is no page in front (then Back leaves the app as usual).
+     */
+    fun pageBack(): Boolean {
+        val t = active ?: return false
+        if (t.blank) return false
+        val v = t.view
+        // Read the history live (a remembered flag can be one page behind after a script navigation).
+        if (v != null && v.canGoBack()) { v.goBack(); return true }
+        val opener = tabs.firstOrNull { it.id == t.openerId }
+        when {
+            opener != null -> { close(t.id, undo = false); activeId = opener.id; screen = Screen.Home; saveTabs() }
+            t.fromApp -> {
+                close(t.id, undo = false)
+                val blank = tabs.lastOrNull { it.blank && !it.private }
+                if (blank != null) activeId = blank.id else newTab(private = false)
+                screen = Screen.Home; saveTabs()
+                host.backToCaller()
+            }
+            else -> leaveToHome()
+        }
+        return true
+    }
+
+    // ---- 1.0.1: updates and default browser ----
+    var update by mutableStateOf<UpdateInfo?>(null)
+    /** Download progress 0..1 while the update downloads, -1 when idle. */
+    var updateProgress by mutableFloatStateOf(-1f)
+    /** Short status under "Check for updates" (e.g. "Checking…", "You're up to date"). */
+    var updateStatus by mutableStateOf<String?>(null)
+    var isDefault by mutableStateOf(false)
+    var introDone by mutableStateOf(false)
+
     fun leaveToHome() {
         val a = active ?: return
         if (a.blank) return

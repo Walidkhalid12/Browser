@@ -1,0 +1,12 @@
+<resources>
+    <color name="splash_bg">#FFFFFF</color>
+    <color name="splash_fg">#000000</color>
+    <!-- 1.0.1: launch theme. Android 12+ uses it for the system launch screen; on Android 8-11 the
+         SplashScreen library draws the same thing, so every phone opens the same way. -->
+    <style name="Theme.Browser.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_bg</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_dot</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
+        <item name="postSplashScreenTheme">@style/Theme.Browser</item>
+    </style>
+</resources>

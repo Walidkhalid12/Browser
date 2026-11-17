@@ -6,3 +6,5 @@ HSPLandroidx/webkit/**;->**(**)**
 Landroidx/webkit/**;
 HSPLandroidx/swiperefreshlayout/**;->**(**)**
 Landroidx/swiperefreshlayout/**;
+HSPLandroidx/core/splashscreen/**;->**(**)**
+Landroidx/core/splashscreen/**;

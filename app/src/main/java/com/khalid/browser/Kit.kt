@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -40,10 +41,17 @@ import kotlinx.coroutines.launch
 
 // ---------- palette ----------
 @Immutable
-data class Pal(val bg: Color, val fg: Color, val soft: Color, val faint: Color, val dark: Boolean)
+/** raised = cards and panels that sit above the page (one step lighter than bg in dark mode). */
+data class Pal(val bg: Color, val fg: Color, val soft: Color, val faint: Color, val dark: Boolean, val raised: Color = bg)
 
 val LightPal = Pal(Color.White, Color.Black, Color(0xFFEEEEEE), Color(0xFFD9D9D9), false)
-val DarkPal = Pal(Color.Black, Color.White, Color(0xFF1A1A1A), Color(0xFF2E2E2E), true)
+/**
+ * 1.0.1 dark palette: a soft near-black base instead of pure #000 (no glowing grey edge on LCD screens like
+ * the Redmi Note 9), off-white text instead of pure #FFF (less glare, still 17:1 contrast), and grey steps
+ * that rise evenly: base 0A -> raised 141414 -> soft 1E1E1E -> faint 333333.
+ */
+const val DARK_BG = 0xFF0A0A0A.toInt()
+val DarkPal = Pal(Color(0xFF0A0A0A), Color(0xFFEDEDED), Color(0xFF1E1E1E), Color(0xFF333333), true, Color(0xFF141414))
 val LocalPal = staticCompositionLocalOf { LightPal }
 
 // ---------- type ----------
@@ -120,6 +128,19 @@ private fun Modifier.squishImpl(scale: Float, haptic: Boolean, onLongPress: (() 
 @Composable
 fun Modifier.enterUp(index: Int, baseDelay: Int = 40, step: Int = 32): Modifier {
     val reveal = LocalReveal.current
+    // 1.0.1: during the opening, every element reads ONE shared clock that starts after the first frame is
+    // on screen. Before, each element ran its own timer from the first composition, so a slow first frame
+    // ate the start of the animation and it jumped.
+    val intro = LocalIntro.current
+    val shared = remember { intro != null && !intro.done }
+    if (reveal == null && shared && intro != null) {
+        val start = (baseDelay + index * step).toFloat().coerceAtMost((INTRO_MS - 300).toFloat())
+        return graphicsLayer {
+            val v = if (intro.done) 1f else EaseOut.transform(((intro.t.value - start) / 300f).coerceIn(0f, 1f))
+            alpha = v
+            translationY = (1f - v) * 10.dp.toPx()
+        }
+    }
     if (reveal != null) {
         val start = (0.15f + index * 0.04f).coerceAtMost(0.5f)
         return graphicsLayer {
@@ -139,3 +160,24 @@ fun Modifier.enterUp(index: Int, baseDelay: Int = 40, step: Int = 32): Modifier 
         translationY = (1f - v) * 10.dp.toPx()
     }
 }
+
+
+/** 1.0.1: one clock for the whole opening animation (milliseconds since the first frame was drawn). */
+class IntroClock {
+    val t = androidx.compose.animation.core.Animatable(0f)
+    var done by androidx.compose.runtime.mutableStateOf(false)
+}
+const val INTRO_MS = 900
+val LocalIntro = androidx.compose.runtime.staticCompositionLocalOf<IntroClock?> { null }
+
+/** 1.0.1: text that can wrap onto several lines (T is always one line). */
+@Composable
+fun TM(
+    text: String, size: TextUnit = 15.sp, weight: Int = 500, color: Color = LocalPal.current.fg,
+    modifier: Modifier = Modifier, center: Boolean = false, maxLines: Int = 8
+) = BasicText(
+    text, modifier,
+    style = TextStyle(fontFamily = Inter, fontWeight = FontWeight(weight), fontSize = size, color = color,
+        textAlign = if (center) TextAlign.Center else TextAlign.Start, letterSpacing = (-0.01f).em, lineHeight = size * 1.35f),
+    maxLines = maxLines
+)

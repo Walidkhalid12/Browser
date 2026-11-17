@@ -350,9 +350,9 @@ fun BottomBar(st: BrowserState, modifier: Modifier, compact: Boolean) {
         Box(
             Modifier.enterUp(2, 120)
                 .squish(0.9f) { if (st.active?.blank == true) st.screen = Screen.Search else { st.newTab(); st.screen = Screen.Home } }
-                .size(h).clip(CircleShape).background(pal.fg),
+                .size(h).clip(CircleShape).background(pal.soft),
             contentAlignment = Alignment.Center
-        ) { Glyph(G.Plus, pal.bg, 20.dp) }
+        ) { Glyph(G.Plus, pal.fg, 20.dp) }
     }
 }
 
@@ -901,6 +901,49 @@ fun MoreScreen(st: BrowserState) {
                             contentAlignment = Alignment.Center
                         ) { T("Sign in", 13.sp, 700, pal.bg) }
                     }
+                }
+            }
+            // 1.0.1: default browser + updates
+            item(key = "default") {
+                Row(
+                    Modifier.enterUp(13, 60).fillMaxWidth()
+                        .then(if (st.isDefault) Modifier else Modifier.squish(0.97f) { st.host.makeDefault() })
+                        .height(66.dp).clip(RoundedCornerShape(22.dp)).background(pal.soft).padding(start = 20.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (st.isDefault) {
+                        T("Browser is your default", 17.sp, 500, modifier = Modifier.weight(1f))
+                        Box(Modifier.size(26.dp).clip(CircleShape).background(pal.fg), contentAlignment = Alignment.Center) {
+                            Canvas(Modifier.size(12.dp)) {
+                                val w = size.width
+                                drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(0f, w * 0.55f); lineTo(w * 0.38f, w * 0.9f); lineTo(w, w * 0.12f) },
+                                    pal.bg, style = androidx.compose.ui.graphics.drawscope.Stroke(2.2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                            }
+                        }
+                    } else {
+                        T("Set as default browser", 17.sp, 500, modifier = Modifier.weight(1f))
+                        Glyph(G.Chevron, pal.fg, 20.dp, 2.dp)
+                    }
+                }
+            }
+            item(key = "updates") {
+                Row(
+                    Modifier.enterUp(14, 60).fillMaxWidth().squish(0.97f) { st.host.checkUpdates(manual = true) }
+                        .height(66.dp).clip(RoundedCornerShape(22.dp)).background(pal.soft).padding(start = 20.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        T("Check for updates", 17.sp, 500)
+                        val sub = when {
+                            st.updateProgress >= 0f -> "Downloading ${(st.updateProgress * 100).toInt()}%"
+                            st.update != null -> "Browser ${st.update!!.version} is ready to install"
+                            else -> st.updateStatus
+                        }
+                        sub?.let { T(it, 12.sp, 500, pal.fg.copy(alpha = 0.6f)) }
+                    }
+                    if (st.update != null) Box(Modifier.size(8.dp).clip(CircleShape).background(pal.fg))
+                    Spacer(Modifier.width(8.dp))
+                    Glyph(G.Chevron, pal.fg, 20.dp, 2.dp)
                 }
             }
             item {

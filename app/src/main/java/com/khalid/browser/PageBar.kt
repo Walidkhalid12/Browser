@@ -364,10 +364,10 @@ private fun FullPill(tab: Tab, count: Int, c: Ink, interactive: Boolean, st: Bro
         }
         // + circle: a new tab on the home page
         Box(
-            Modifier.size(54.dp).clip(CircleShape).background(c.ink)
+            Modifier.size(54.dp).clip(CircleShape).background(c.fill)
                 .then(if (live) Modifier.squish(0.9f) { st!!.newTab(); st.screen = Screen.Home } else Modifier),
             contentAlignment = Alignment.Center
-        ) { Glyph(G.Plus, c.base, 20.dp) }
+        ) { Glyph(G.Plus, c.ink, 20.dp) }
     }
 }
 

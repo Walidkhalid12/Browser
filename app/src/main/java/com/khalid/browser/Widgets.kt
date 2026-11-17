@@ -37,7 +37,10 @@ object WidgetStats {
 object Widgets {
     private fun pi(c: Context, code: Int, i: Intent): PendingIntent =
         PendingIntent.getActivity(c, code, i.setClass(c, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            // 1.0.1: bring the running Browser forward and deliver the tap to it (onNewIntent) instead of
+            // rebuilding the screen; no launch animation from the widget, the app's own sheet opens at once.
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     private fun action(c: Context, a: String, code: Int) = pi(c, code, Intent(a))
 
