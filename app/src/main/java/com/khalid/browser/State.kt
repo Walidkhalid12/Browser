@@ -819,6 +819,8 @@ class BrowserState(initialDark: Boolean, val store: Store, val host: BrowserHost
     var updateProgress by mutableFloatStateOf(-1f)
     /** Short status under "Check for updates" (e.g. "Checking…", "You're up to date"). */
     var updateStatus by mutableStateOf<String?>(null)
+    /** 1.0.5: "Check for updates" was tapped and GitHub hasn't answered yet. */
+    var updateChecking by mutableStateOf(false)
     var isDefault by mutableStateOf(false)
     var introDone by mutableStateOf(false)
     /** 1.0.3: the version whose home banner was closed (it comes back for the next version). */

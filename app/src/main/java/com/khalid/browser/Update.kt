@@ -46,8 +46,6 @@ class UpdateInfo(
 object Updater {
     const val REPO = "Walidkhalid12/Browser"
     private const val API = "https://api.github.com/repos/$REPO/releases/latest"
-    /** Automatic checks at most this often; "Check for updates" always checks. */
-    const val AUTO_EVERY_MS = 6L * 60 * 60 * 1000
 
     /** "1.0.10" > "1.0.9", "v1.1" > "1.0.9", "1.0.1" == "1.0.1". Anything after '-' or '+' is ignored. */
     fun compare(a: String, b: String): Int {
@@ -80,7 +78,8 @@ object Updater {
     fun extraNotes(u: UpdateInfo): String =
         if (u.notes.trim().removePrefix("\u2022 ").trim().equals(u.name, ignoreCase = true)) "" else u.notes
 
-    /** 1.0.3: the home banner shows for a newer version until it is closed; closing it holds only for that version. */
+    /** The home banner shows for a newer version unless it was closed for that version. 1.0.5: closing only lasts
+     * until the app is opened again (it isn't saved), so the announcement always comes back. */
     fun showBanner(found: UpdateInfo?, current: String, closedFor: String?): Boolean =
         found != null && compare(found.version, current) > 0 && closedFor != found.version
 
@@ -134,28 +133,107 @@ object Updater {
         class Failed(val why: String) : Check()
     }
 
-    /** Network call; run off the main thread. */
-    fun check(current: String): Check {
-        val c = runCatching { URL(API).openConnection() as HttpURLConnection }.getOrElse { return Check.Failed("No connection") }
-        return try {
-            c.connectTimeout = 8000; c.readTimeout = 8000
-            c.setRequestProperty("Accept", "application/vnd.github+json")
-            c.setRequestProperty("User-Agent", "Browser/$current (Android)")
-            when (val code = c.responseCode) {
-                200 -> {
-                    val json = c.inputStream.bufferedReader().use { it.readText() }
-                    val info = parse(json) ?: return Check.UpToDate
-                    if (compare(info.version, current) > 0) Check.Newer(info, json) else Check.UpToDate
-                }
-                403, 429 -> Check.Failed("GitHub is busy, try again later")
-                404 -> Check.UpToDate
-                else -> Check.Failed("Couldn't check ($code)")
-            }
-        } catch (e: Exception) {
-            Check.Failed("No connection")
-        } finally {
-            c.disconnect()
+    // 1.0.5: the web page's "latest" redirect, used when the API is rate-limited or down (it has no hourly limit).
+    private const val WEB = "https://github.com/$REPO"
+
+    /** 1.0.5: the API answer couldn't be used; [why] is the reason shown to the person if the fallback fails too. */
+    private class ApiDown(val why: String) : Exception(why)
+
+    /**
+     * Network call; run off the main thread. 1.0.5: asks the GitHub API first; when the API says no (rate limit,
+     * server error, no answer), it reads the release from github.com/…/releases/latest instead. [api] and [web] are
+     * only changed by tests.
+     */
+    fun check(current: String, api: String = API, web: String = WEB): Check {
+        val apiWhy = try {
+            return fromApi(current, api)
+        } catch (e: ApiDown) { e.why }
+        return try { fromWeb(current, web) } catch (e: Exception) { Check.Failed(apiWhy) }
+    }
+
+    private fun open(url: String, current: String): HttpURLConnection =
+        (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000; readTimeout = 10000
+            useCaches = false
+            setRequestProperty("User-Agent", "Browser/$current (Android; +https://github.com/$REPO)")
+            setRequestProperty("Cache-Control", "no-cache")
         }
+
+    private fun fromApi(current: String, api: String): Check {
+        val c = try { open(api, current) } catch (e: Exception) { throw ApiDown(reason(e)) }
+        try {
+            c.setRequestProperty("Accept", "application/vnd.github+json")
+            c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            val code = try { c.responseCode } catch (e: Exception) { throw ApiDown(reason(e)) }
+            when (code) {
+                200 -> {
+                    val json = try { c.inputStream.bufferedReader().use { it.readText() } } catch (e: Exception) { throw ApiDown(reason(e)) }
+                    val info = try { parse(json) } catch (e: Exception) { throw ApiDown("GitHub sent an answer Browser couldn't read") }
+                        ?: return Check.UpToDate
+                    return if (compare(info.version, current) > 0) Check.Newer(info, json) else Check.UpToDate
+                }
+                404 -> return Check.UpToDate
+                403, 429 -> {
+                    val reset = c.getHeaderField("X-RateLimit-Reset")?.toLongOrNull()
+                    val mins = reset?.let { ((it * 1000 - System.currentTimeMillis()) / 60000 + 1).coerceIn(1, 60) }
+                    throw ApiDown(if (mins != null) "GitHub's limit was reached. Try again in $mins min" else "GitHub's limit was reached. Try again later")
+                }
+                else -> throw ApiDown("GitHub didn't answer (error $code). Try again later")
+            }
+        } finally { c.disconnect() }
+    }
+
+    /** 1.0.5: github.com/…/releases/latest redirects to …/releases/tag/vX.Y.Z; the APK has a fixed name. */
+    private fun fromWeb(current: String, web: String): Check {
+        val c = open("$web/releases/latest", current)
+        try {
+            c.instanceFollowRedirects = false
+            val code = c.responseCode
+            if (code !in 300..399) throw IllegalStateException("no redirect ($code)")
+            val loc = c.getHeaderField("Location") ?: throw IllegalStateException("no location")
+            val tag = loc.substringAfter("/releases/tag/", "").substringBefore('?').substringBefore('#')
+            if (tag.isEmpty()) return Check.UpToDate
+            val version = tag.removePrefix("v").removePrefix("V")
+            if (compare(version, current) <= 0) return Check.UpToDate
+            val apk = "Browser-$version.apk"
+            val json = JSONObject()
+                .put("tag_name", tag).put("name", "").put("body", "")
+                .put("html_url", "$web/releases/tag/$tag")
+                .put("assets", org.json.JSONArray().put(JSONObject()
+                    .put("name", apk).put("size", -1)
+                    .put("browser_download_url", "$web/releases/download/$tag/$apk")))
+                .toString()
+            val info = parse(json) ?: return Check.UpToDate
+            return Check.Newer(info, json)
+        } finally { c.disconnect() }
+    }
+
+    /** 1.0.5: say why the check failed, instead of "No connection" for everything. */
+    fun reason(e: Throwable): String = when (e) {
+        is java.net.UnknownHostException -> "No internet connection"
+        is java.net.SocketTimeoutException -> "GitHub took too long to answer. Try again"
+        is java.net.ConnectException -> "Couldn't connect to GitHub. Check your internet"
+        is javax.net.ssl.SSLException -> "Secure connection to GitHub failed. Check the phone's date and time"
+        else -> "Couldn't reach GitHub. Check your internet"
+    }
+
+    // ---- 1.0.5: when to check ----
+    /** Automatic checks (app opened or brought back) at most this often. Only successful checks count. */
+    const val AUTO_EVERY_MS = 30L * 60 * 1000
+    const val K_CHECKED = "update_ok_at"
+
+    /** An automatic check is due when the last successful one is old enough (or the clock went back). */
+    fun due(lastOk: Long, now: Long, every: Long = AUTO_EVERY_MS): Boolean = lastOk <= 0L || now < lastOk || now - lastOk >= every
+
+    /** Record a check that reached GitHub: when, and the newer release (or none). */
+    fun saveResult(ctx: Context, r: Check, now: Long = System.currentTimeMillis()) {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        when (r) {
+            is Check.Newer -> p.putLong(K_CHECKED, now).putString(K_JSON, r.json)
+            is Check.UpToDate -> p.putLong(K_CHECKED, now).remove(K_JSON)
+            is Check.Failed -> {}
+        }
+        p.apply()
     }
 
     /** Download the APK to the app's cache with progress (0..1). Runs off the main thread. Returns the file or throws. */

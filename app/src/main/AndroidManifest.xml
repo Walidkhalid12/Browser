@@ -81,6 +81,16 @@
             android:name=".UpdateJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- 1.0.5: sets the update check up again after a restart of the phone and after an app update -->
+        <receiver
+            android:name=".UpdateBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <!-- 1.0.4: weekly filter list update for the ad blocker (Wi-Fi, battery not low). -->
         <service
             android:name=".FilterJob"

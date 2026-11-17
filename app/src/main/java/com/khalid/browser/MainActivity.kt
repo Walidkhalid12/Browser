@@ -118,11 +118,9 @@ class MainActivity : ComponentActivity(), BrowserHost {
     private fun afterIntro(prefs: android.content.SharedPreferences) {
         if (isRobolectric) return
         Looper.myQueue().addIdleHandler { runCatching { WebSettings.getDefaultUserAgent(this) }; false }
-        Bg.main.postDelayed({
-            val last = prefs.getLong("update_checked_at", 0L)
-            if (System.currentTimeMillis() - last > Updater.AUTO_EVERY_MS) checkUpdates(manual = false)
-        }, 1500L)
-        // 1.0.3: background check for new versions (about twice a day) with an "App updates" notification.
+        // 1.0.5: every launch checks GitHub (at most every 30 min, only successful checks count).
+        Bg.main.postDelayed({ autoCheck() }, 1500L)
+        // Background check for new versions with an "App updates" notification (1.0.5: re-set up on every launch).
         Bg.main.postDelayed({
             UpdateJob.channel(this)
             UpdateJob.schedule(this)
@@ -161,37 +159,51 @@ class MainActivity : ComponentActivity(), BrowserHost {
 
     override fun backToCaller() { moveTaskToBack(true) }
 
-    override fun updateBannerClosed(version: String) {
-        getSharedPreferences("browser", Context.MODE_PRIVATE).edit().putString(Updater.K_CLOSED, version).apply()
+    // 1.0.5: closing the home announcement only lasts until the app is opened again (not saved).
+    override fun updateBannerClosed(version: String) {}
+
+    /** 1.0.5: automatic check when the app opens or comes back, unless a successful check ran in the last 30 min. */
+    private fun autoCheck() {
+        if (!::st.isInitialized) return
+        // A release the background check found while the app was away shows at once.
+        if (st.update == null) Updater.cached(this, APP_VERSION)?.let { st.update = it }
+        if (isRobolectric) return
+        val last = getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE).getLong(Updater.K_CHECKED, 0L)
+        if (Updater.due(last, System.currentTimeMillis())) checkUpdates(manual = false)
     }
+
+    @Volatile private var checking = false
 
     override fun checkUpdates(manual: Boolean) {
         if (st.updateProgress >= 0f) { st.card = Card.Update; return }
-        if (manual && st.update != null) { st.card = Card.Update; return }
-        if (manual) st.updateStatus = "Checking\u2026"
-        val prefs = getSharedPreferences("browser", Context.MODE_PRIVATE)
-        Bg.run {
-            val r = Updater.check(APP_VERSION)
+        // 1.0.5: "Check for updates" always asks GitHub again; a release already found opens right away meanwhile.
+        if (manual) { st.updateStatus = "Checking\u2026"; st.updateChecking = true; if (st.update != null) st.card = Card.Update }
+        if (checking) return
+        checking = true
+        val app = applicationContext
+        Thread {
+            val r = runCatching { Updater.check(APP_VERSION) }.getOrElse { Updater.Check.Failed(Updater.reason(it)) }
+            Updater.saveResult(app, r)
             Bg.main.post {
+                checking = false
+                val asked = st.updateChecking
+                st.updateChecking = false
                 when (r) {
                     is Updater.Check.Newer -> {
-                        prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
-                        Updater.saveFound(this, r.json)
                         st.update = r.info
-                        st.updateStatus = null
-                        // 1.0.3: the automatic check announces it with the home banner; a manual check opens the card.
-                        if (manual && st.card == null) st.card = Card.Update
+                        st.updateStatus = "Browser ${r.info.version} is available"
+                        // The automatic check announces it with the home banner; a manual check opens the card.
+                        if (manual || asked) st.card = Card.Update
                     }
                     is Updater.Check.UpToDate -> {
-                        prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
                         st.update = null
                         st.updateStatus = "You're up to date ($APP_VERSION)"
                         UpdateJob.clear(this)
                     }
-                    is Updater.Check.Failed -> if (manual) st.updateStatus = r.why
+                    is Updater.Check.Failed -> if (manual || asked) st.updateStatus = r.why
                 }
             }
-        }
+        }.apply { name = "browser-update"; isDaemon = true }.start()
     }
 
     override fun installUpdate() {
@@ -275,7 +287,6 @@ class MainActivity : ComponentActivity(), BrowserHost {
         st = BrowserState(dark, Store(this), this, account)
         // 1.0.3: a release found earlier (at launch or by the background check) shows its home banner right away.
         st.update = Updater.cached(this, APP_VERSION)
-        st.updateBannerClosed = prefs.getString(Updater.K_CLOSED, null)
         currentState = st
         // Tabs come back exactly as they were (history and scroll) after the app was killed.
         // 1.0.0: the state files are read on a background thread (the app opens on home, so no page needs
@@ -487,6 +498,8 @@ class MainActivity : ComponentActivity(), BrowserHost {
         // 1.0.1: the "came back, show home" reset moved to onResume. onStart runs BEFORE onNewIntent, so a
         // widget tap first jumped to home and then to the widget's screen (two screen changes, one wasted
         // frame); in onResume the widget intent has already cleared leftByUser and opens straight away.
+        // 1.0.5: coming back to the app (MIUI keeps it open in the background) also checks for updates.
+        if (::st.isInitialized && st.introDone) Bg.main.postDelayed({ autoCheck() }, 800L)
     }
 
     override fun onUserLeaveHint() {

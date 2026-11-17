@@ -11,8 +11,8 @@
 <p align="center"><b>A clean, black-and-white Android browser with smooth motion and downloads done right.</b></p>
 
 <p align="center">
-  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.4/Browser-1.0.4.apk">
-    <img src="https://img.shields.io/badge/Download%20APK-v1.0.4-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
+  <a href="https://github.com/Walidkhalid12/Browser/releases/download/v1.0.5/Browser-1.0.5.apk">
+    <img src="https://img.shields.io/badge/Download%20APK-v1.0.5-000000?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" height="48">
   </a>
 </p>
 
@@ -94,7 +94,7 @@ It's free, open source, and only about 2 MB.
 - Reader mode, translate, site info, QR code for any page, add to home screen, save as PDF, desktop mode and text size per site.
 - Background audio and video, picture-in-picture, and full-screen video that turns to landscape.
 - Home-screen widgets: search bar, quick actions, top sites, ads blocked, and the dot.
-- Updates inside the app: a card on the home screen and an "App updates" notification when a new version is out, then one tap downloads it, checks it and installs it.
+- Updates inside the app: Browser checks GitHub each time you open it, shows a card on the home screen and an "App updates" notification when a new version is out, then one tap downloads it, checks it and installs it.
 
 ## Why it's different
 
@@ -110,12 +110,14 @@ It's free, open source, and only about 2 MB.
 
 ## Install
 
-1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.4.apk**.
+1. On your phone, open the [latest release](https://github.com/Walidkhalid12/Browser/releases/latest) and download **Browser-1.0.5.apk**.
 2. Open the file. If Android asks, allow your browser or file manager to **install unknown apps**.
 3. Tap **Install**.
 4. **Play Protect** may warn you because the app isn't from the Play Store. Tap **More details**, then **Install anyway**.
 
 You can check the file with its SHA-256, listed on the release page.
+
+On 1.0.4 or older? Install 1.0.5 this way once. From 1.0.5 on, new versions show up inside the app.
 
 ## Build from source
 

@@ -20,8 +20,8 @@ android {
         applicationId = "com.khalid.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26
-        versionName = "1.0.4"
+        versionCode = 27
+        versionName = "1.0.5"
     }
     signingConfigs {
         if (keystoreProps.getProperty("storeFile") != null) {
@@ -46,7 +46,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    testOptions { unitTests { isIncludeAndroidResources = true; all { it.maxHeapSize = "3g"; it.systemProperty("filters.dir", (project.findProperty("filtersDir") ?: "").toString()) } } }
+    testOptions { unitTests { isIncludeAndroidResources = true; all { it.maxHeapSize = "3g"; it.systemProperty("filters.dir", (project.findProperty("filtersDir") ?: "").toString()); it.systemProperty("live.github", (project.findProperty("liveGithub") ?: "").toString()) } } }
     lint { checkReleaseBuilds = false; abortOnError = false }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }

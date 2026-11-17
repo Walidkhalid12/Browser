@@ -28,8 +28,9 @@ class UpdateJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         val app = applicationContext
         thread = Thread {
-            runCatching { checkAndNotify(app) }
-            jobFinished(params, false)
+            // 1.0.5: a failed check (no internet yet, GitHub busy) is retried soon by Android instead of in 12 h.
+            val ok = runCatching { checkAndNotify(app) }.getOrDefault(false)
+            jobFinished(params, !ok)
         }.apply { priority = Thread.MIN_PRIORITY; start() }
         return true
     }
@@ -37,45 +38,67 @@ class UpdateJob : JobService() {
     override fun onStopJob(params: JobParameters): Boolean { thread?.interrupt(); return true }
 
     companion object {
-        private const val JOB_ID = 7201
+        // 1.0.5: a new job id, so phones coming from 1.0.3/1.0.4 drop the old 12-hour job (it also waited for a
+        // battery that isn't low) and get the new one.
+        private const val OLD_JOB_ID = 7201
+        const val JOB_ID = 7203
         private const val NOTIF_ID = 7202
-        const val CH_UPDATES = "app_updates"
-        private const val EVERY_MS = 12L * 60 * 60 * 1000
-        private const val FLEX_MS = 3L * 60 * 60 * 1000
+        /** 1.0.5: new channel id with high importance (the old "app_updates" channel was quieter and can't be changed). */
+        const val CH_UPDATES = "app_updates_v2"
+        private const val OLD_CH = "app_updates"
+        const val EVERY_MS = 6L * 60 * 60 * 1000
+        const val FLEX_MS = 2L * 60 * 60 * 1000
 
-        /** Set up the periodic check once; it survives restarts of the phone. */
+        /** The job this version wants: every ~6 hours with any internet, kept across restarts of the phone. */
+        fun jobInfo(c: Context): JobInfo = JobInfo.Builder(JOB_ID, ComponentName(c, UpdateJob::class.java))
+            .setPeriodic(EVERY_MS, FLEX_MS)
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+            .setBackoffCriteria(15L * 60 * 1000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
+            .setPersisted(true)
+            .build()
+
+        /**
+         * 1.0.5: called on every launch, after the phone restarts and after the app is updated (MIUI can cancel
+         * jobs when it clears the app). Sets the job up again when it's missing or different.
+         */
         fun schedule(c: Context) {
             runCatching {
                 val js = c.getSystemService(JobScheduler::class.java) ?: return
-                if (js.getPendingJob(JOB_ID) != null) return
-                val info = JobInfo.Builder(JOB_ID, ComponentName(c, UpdateJob::class.java))
-                    .setPeriodic(EVERY_MS, FLEX_MS)
-                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                    .setRequiresBatteryNotLow(true)
-                    .setPersisted(true)
-                    .build()
-                js.schedule(info)
+                runCatching { js.cancel(OLD_JOB_ID) }
+                val want = jobInfo(c)
+                val have = js.getPendingJob(JOB_ID)
+                if (have != null && have.intervalMillis == want.intervalMillis && have.networkType == want.networkType &&
+                    have.isPersisted && !have.isRequireBatteryNotLow) return
+                js.schedule(want)
             }
         }
 
         fun channel(c: Context) {
             if (Build.VERSION.SDK_INT < 26) return
-            c.getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CH_UPDATES, "App updates", NotificationManager.IMPORTANCE_DEFAULT).apply {
+            val nm = c.getSystemService(NotificationManager::class.java)
+            runCatching { nm.deleteNotificationChannel(OLD_CH) }
+            nm.createNotificationChannel(
+                NotificationChannel(CH_UPDATES, "App updates", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "A new version of Browser is out"
                 }
             )
         }
 
-        /** Network call; runs off the main thread. */
-        fun checkAndNotify(c: Context) {
-            val r = Updater.check(APP_VERSION) as? Updater.Check.Newer ?: return
-            val prefs = c.getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE)
-            Updater.saveFound(c, r.json)
-            prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
-            if (!Updater.shouldNotify(r.info.version, APP_VERSION, prefs.getString(Updater.K_NOTIFIED, null))) return
-            if (!DlService.canNotify(c)) return
-            if (notify(c, r.info)) prefs.edit().putString(Updater.K_NOTIFIED, r.info.version).apply()
+        /** Network call; runs off the main thread. Returns false when GitHub couldn't be reached (retry soon). */
+        fun checkAndNotify(c: Context): Boolean {
+            val r = Updater.check(APP_VERSION)
+            Updater.saveResult(c, r)
+            when (r) {
+                is Updater.Check.Failed -> return false
+                is Updater.Check.UpToDate -> { clear(c); return true }
+                is Updater.Check.Newer -> {
+                    val prefs = c.getSharedPreferences(Updater.PREFS, Context.MODE_PRIVATE)
+                    if (!Updater.shouldNotify(r.info.version, APP_VERSION, prefs.getString(Updater.K_NOTIFIED, null))) return true
+                    if (!DlService.canNotify(c) || !NotificationManagerCompat.from(c).areNotificationsEnabled()) return true
+                    if (notify(c, r.info)) prefs.edit().putString(Updater.K_NOTIFIED, r.info.version).apply()
+                    return true
+                }
+            }
         }
 
         fun notify(c: Context, u: UpdateInfo): Boolean = runCatching {
@@ -90,7 +113,7 @@ class UpdateJob : JobService() {
                 .setContentTitle("Browser ${u.version} is available")
                 .setContentText(u.name.ifBlank { "Tap to update" })
                 .setContentIntent(open).setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .build()
             NotificationManagerCompat.from(c).notify(NOTIF_ID, n)
@@ -99,5 +122,14 @@ class UpdateJob : JobService() {
 
         /** The update was installed or seen in the app: the notification is no longer needed. */
         fun clear(c: Context) { runCatching { NotificationManagerCompat.from(c).cancel(NOTIF_ID) } }
+    }
+}
+
+/** 1.0.5: sets the background update check up again after the phone restarts and after Browser is updated. */
+class UpdateBootReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(c: Context, i: Intent) {
+        if (i.action != Intent.ACTION_BOOT_COMPLETED && i.action != Intent.ACTION_MY_PACKAGE_REPLACED &&
+            i.action != "android.intent.action.QUICKBOOT_POWERON") return
+        runCatching { UpdateJob.channel(c); UpdateJob.schedule(c) }
     }
 }

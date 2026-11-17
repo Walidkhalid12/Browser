@@ -967,7 +967,8 @@ fun MoreScreen(st: BrowserState) {
                         T("Check for updates", 17.sp, 500)
                         val sub = when {
                             st.updateProgress >= 0f -> "Downloading ${(st.updateProgress * 100).toInt()}%"
-                            st.update != null -> "Browser ${st.update!!.version} is ready to install"
+                            st.updateChecking -> "Checking\u2026"
+                            st.update != null -> "Browser ${st.update!!.version} is available"
                             else -> st.updateStatus
                         }
                         sub?.let { T(it, 12.sp, 500, pal.fg.copy(alpha = 0.6f)) }

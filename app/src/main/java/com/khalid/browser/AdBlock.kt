@@ -147,6 +147,7 @@ object AdBlock {
     // ------------------------------------------------------------------ used by the web view
     /** Should this request from a page on [pageHost] be blocked? Falls back to the built-in host list until lists load. */
     fun blockRequest(url: String, host: String, pageHost: String, accept: String?): Boolean {
+        if (neverBlock(host)) return false
         val e = engine
         if (e == null) {
             if (pageHost.isNotEmpty() && (host == pageHost || host.endsWith(".$pageHost"))) return false
@@ -158,12 +159,20 @@ object AdBlock {
     /** A page or pop-up going to an ad or scam address. */
     fun adNavigation(url: String, pageHost: String): Boolean {
         if (!url.startsWith("http")) return false
+        if (neverBlock(hostOfUrl(url))) return false
         val e = engine ?: return Blocker.blocked(hostOfUrl(url))
         return e.isAdNavigation(url, pageHost)
     }
 
     fun pageCss(host: String): String = engine?.pageCss(host).orEmpty()
     fun genericCss(host: String, names: String): String = engine?.genericCss(host, names).orEmpty()
+
+    /** 1.0.5: GitHub, where Browser's own updates come from, is never blocked (pages, API, release files). */
+    private val SAFE = arrayOf("github.com", "githubusercontent.com", "githubassets.com")
+    fun neverBlock(host: String): Boolean {
+        val h = host.lowercase().trimEnd('.')
+        return SAFE.any { h == it || h.endsWith(".$it") }
+    }
 
     private fun hostOfUrl(u: String) = u.substringAfter("://").substringBefore('/').substringBefore(':').substringBefore('?').lowercase()
 }
